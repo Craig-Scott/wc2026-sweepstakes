@@ -1,0 +1,225 @@
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { useMatches } from '@/hooks/useMatches'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
+import { useParticipants } from '@/hooks/useParticipants'
+import { usePredictionsForParticipant } from '@/hooks/usePredictions'
+import { PredictionForm } from '@/components/predictions/PredictionForm'
+import { TeamBadge } from '@/components/shared/TeamBadge'
+import { HomeMatchSectionSkeleton } from '@/components/shared/Skeleton'
+import { formatKickoffFull } from '@/utils/dates'
+import { isCanonicalPrediction, predictionLabel } from '@/utils/predictions'
+import { STAGE_LABELS } from '@/config/tournament'
+import type { Match, Prediction, Participant } from '@/types'
+
+type Tab = 'predict' | 'results'
+
+// ── Result card with prediction overlay ──────────────────────────────────────
+
+function ResultWithPrediction({ match, prediction, participants }: {
+  match: Match; prediction?: Prediction; participants: Participant[]
+}) {
+  const homeWin = (match.score.home ?? 0) > (match.score.away ?? 0)
+  const awayWin = (match.score.away ?? 0) > (match.score.home ?? 0)
+  const findOwner = (code: string) => participants.find(p => p.teamCodes.includes(code))?.name
+
+  const pts = prediction?.pointsAwarded ?? null
+  const ptsColor = pts === 6 ? 'text-brand-600' : pts === 3 ? 'text-blue-600' : 'text-gray-400'
+
+  const predText = prediction
+    ? predictionLabel(
+        prediction.predictedHome,
+        prediction.predictedAway,
+        match.homeTeam.name,
+        match.awayTeam.name,
+      )
+    : null
+
+  const predIsScore = prediction && !isCanonicalPrediction(prediction.predictedHome, prediction.predictedAway)
+
+  const outcome =
+    pts === 6 ? 'Exact score ✓'
+    : pts === 3 ? 'Correct result ✓'
+    : pts === 0 ? 'Incorrect ✗'
+    : null
+
+  const outcomeColor =
+    pts === 6 ? 'text-brand-600'
+    : pts === 3 ? 'text-blue-600'
+    : pts === 0 ? 'text-red-400'
+    : 'text-gray-400'
+
+  return (
+    <div className="card p-4 space-y-3">
+      {/* Stage + date */}
+      <div className="flex justify-between text-xs text-gray-400">
+        <span>{STAGE_LABELS[match.stage] ?? match.stage}{match.group ? ` · Group ${match.group}` : ''}</span>
+        <span>{formatKickoffFull(match.kickoff)}</span>
+      </div>
+
+      {/* Teams + score */}
+      <div className="flex items-center gap-4">
+        <div className={`flex-1 flex flex-col items-start gap-0.5 ${homeWin ? '' : 'opacity-50'}`}>
+          <TeamBadge code={match.homeTeam.code} name={match.homeTeam.name} />
+          {findOwner(match.homeTeam.code) && (
+            <span className="text-xs text-gray-400 ml-0.5">{findOwner(match.homeTeam.code)}</span>
+          )}
+        </div>
+        <div className="font-display font-bold text-4xl text-navy-900 tabular-nums leading-none text-center">
+          {match.score.home} <span className="text-gray-300">–</span> {match.score.away}
+        </div>
+        <div className={`flex-1 flex flex-col items-end gap-0.5 ${awayWin ? '' : 'opacity-50'}`}>
+          <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} reverse />
+          {findOwner(match.awayTeam.code) && (
+            <span className="text-xs text-gray-400 mr-0.5">{findOwner(match.awayTeam.code)}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Scorers */}
+      {match.scorers.length > 0 && (
+        <div className="text-xs text-gray-500 space-y-0.5 border-t border-gray-100 pt-2">
+          {match.scorers.map((s, i) => (
+            <div key={i} className="flex gap-1.5">
+              <span className="text-gray-400 w-6 text-right shrink-0">{s.minute}'</span>
+              <span>
+                {s.isOwnGoal && <span className="text-red-400 mr-1">(OG)</span>}
+                {s.isPenalty && <span className="text-gray-400 mr-1">(pen)</span>}
+                {s.player}
+                <span className="text-gray-400 ml-1">({s.team})</span>
+                {s.distanceMeters && (
+                  <span className="ml-1 text-brand-600 font-medium">{s.distanceMeters}m</span>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Cards */}
+      {match.cards.length > 0 && (
+        <div className="flex flex-wrap gap-2 text-xs border-t border-gray-100 pt-2">
+          {match.cards.map((c, i) => (
+            <span key={i} className="flex items-center gap-1 text-gray-500">
+              {c.type === 'YELLOW' ? '🟨' : '🟥'} {c.player} {c.minute}'
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Prediction summary */}
+      <div className="border-t border-gray-100 pt-2">
+        {prediction ? (
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-gray-500">
+              Your pick:{' '}
+              <span className="font-medium text-gray-700">
+                {predText}
+                {predIsScore && (
+                  <span className="text-gray-400 ml-1 font-normal">
+                    ({prediction.predictedHome}–{prediction.predictedAway})
+                  </span>
+                )}
+              </span>
+            </span>
+            <div className="flex items-center gap-2 shrink-0 ml-3">
+              {outcome && <span className={`font-medium ${outcomeColor}`}>{outcome}</span>}
+              {pts !== null && <span className={`font-bold ${ptsColor}`}>{pts}pts</span>}
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-400">No prediction made</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Main section ──────────────────────────────────────────────────────────────
+
+export function HomeMatchSection() {
+  const [tab, setTab] = useState<Tab>('predict')
+  const { matches, isLoading } = useMatches()
+  const { firebaseUser, userRecord } = useCurrentUser()
+  const { participants } = useParticipants()
+  const participantId = userRecord?.participantId ?? null
+  const { predictions } = usePredictionsForParticipant(participantId)
+  const predsByMatch = new Map(predictions.map(p => [p.matchId, p]))
+
+  const predictMatches = matches
+    .filter(m => ['SCHEDULED', 'TIMED', 'IN_PLAY', 'PAUSED'].includes(m.status))
+    .slice(0, 10)
+
+  const finishedMatches = matches
+    .filter(m => m.status === 'FINISHED')
+    .slice(-10)
+    .reverse()
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex gap-1">
+          {(['predict', 'results'] as Tab[]).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                tab === t
+                  ? 'bg-brand-600 text-white'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              {t === 'predict' ? 'Predict' : 'Results'}
+            </button>
+          ))}
+        </div>
+        <Link to="/predictions" className="text-xs text-brand-600 hover:underline font-medium">
+          All predictions →
+        </Link>
+      </div>
+
+      {isLoading ? (
+        <HomeMatchSectionSkeleton />
+      ) : tab === 'predict' ? (
+        predictMatches.length === 0 ? (
+          <div className="text-sm text-gray-500 text-center py-8">No upcoming matches right now.</div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {predictMatches.map(match => (
+              <div key={match.id} className="card p-4">
+                {firebaseUser && participantId ? (
+                  <PredictionForm
+                    match={match}
+                    participantId={participantId}
+                    uid={firebaseUser.uid}
+                    existingPrediction={predsByMatch.get(match.id)}
+                  />
+                ) : (
+                  <div className="text-sm text-gray-500 text-center py-2">
+                    <Link to="/login" className="text-brand-600 hover:underline font-medium">Sign in</Link>
+                    {' '}to predict this match
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+        finishedMatches.length === 0 ? (
+          <div className="text-sm text-gray-500 text-center py-8">No results yet.</div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {finishedMatches.map(match => (
+              <ResultWithPrediction
+                key={match.id}
+                match={match}
+                prediction={predsByMatch.get(match.id)}
+                participants={participants}
+              />
+            ))}
+          </div>
+        )
+      )}
+    </div>
+  )
+}
