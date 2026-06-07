@@ -14,6 +14,33 @@ import type { Match, Prediction, Participant } from '@/types'
 
 type Tab = 'predict' | 'results'
 
+function MatchPreview({ match, participants }: { match: Match; participants: Participant[] }) {
+  const findOwner = (code: string) => participants.find(p => p.teamCodes.includes(code))?.name
+  return (
+    <div className="relative flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <TeamBadge code={match.homeTeam.code} name={match.homeTeam.name} size="lg" bold />
+        {findOwner(match.homeTeam.code) && (
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
+            {findOwner(match.homeTeam.code)}
+          </span>
+        )}
+      </div>
+      <span className="absolute left-1/2 -translate-x-1/2 text-xs text-gray-400 pointer-events-none">
+        {formatKickoffFull(match.kickoff)}
+      </span>
+      <div className="flex items-center gap-2">
+        {findOwner(match.awayTeam.code) && (
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
+            {findOwner(match.awayTeam.code)}
+          </span>
+        )}
+        <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} size="lg" bold reverse />
+      </div>
+    </div>
+  )
+}
+
 // ── Result card with prediction overlay ──────────────────────────────────────
 
 function ResultWithPrediction({ match, prediction, participants }: {
@@ -185,6 +212,20 @@ export function HomeMatchSection() {
           <div className="text-sm text-gray-500 text-center py-8">No upcoming matches right now.</div>
         ) : (
           <div className="flex flex-col gap-3">
+            {!firebaseUser && (
+              <div className="card p-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-navy-900">Want to play?</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Sign in to make predictions and compete on the leaderboard.</p>
+                </div>
+                <Link
+                  to="/login"
+                  className="shrink-0 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                >
+                  Sign in
+                </Link>
+              </div>
+            )}
             {predictMatches.map(match => (
               <div key={match.id} className="card p-4">
                 {firebaseUser && participantId ? (
@@ -195,10 +236,7 @@ export function HomeMatchSection() {
                     existingPrediction={predsByMatch.get(match.id)}
                   />
                 ) : (
-                  <div className="text-sm text-gray-500 text-center py-2">
-                    <Link to="/login" className="text-brand-600 hover:underline font-medium">Sign in</Link>
-                    {' '}to predict this match
-                  </div>
+                  <MatchPreview match={match} participants={participants} />
                 )}
               </div>
             ))}
