@@ -1,8 +1,6 @@
 import { useParticipants } from '@/hooks/useParticipants'
-import { useConfig } from '@/hooks/useConfig'
 import { TeamBadge } from '@/components/shared/TeamBadge'
 import { ParticipantsGridSkeleton } from '@/components/shared/Skeleton'
-import { calculatePrizePool, formatCurrency } from '@/utils/prizes'
 
 function ParticipantAvatar({ name, photoURL, size = 'lg' }: {
   name: string
@@ -32,12 +30,7 @@ function ParticipantAvatar({ name, photoURL, size = 'lg' }: {
 
 export function ParticipantsTable() {
   const { participants, isLoading } = useParticipants()
-  const { config } = useConfig()
-
   if (isLoading) return <ParticipantsGridSkeleton />
-
-  const paidCount = participants.filter(p => p.hasPaid).length
-  const prizePool = calculatePrizePool(participants, config.entryFee)
 
   return (
     <div>
@@ -68,12 +61,6 @@ export function ParticipantsTable() {
         ))}
       </div>
 
-      <div className="flex gap-6 text-sm text-gray-500">
-        <span>{paidCount}/{participants.length} paid</span>
-        <span className="font-semibold text-brand-600">
-          Prize pool: {formatCurrency(prizePool)}
-        </span>
-      </div>
     </div>
   )
 }
