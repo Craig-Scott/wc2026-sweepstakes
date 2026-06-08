@@ -56,7 +56,7 @@ export async function uploadParticipantPhoto(
   participantId: string,
   file: File,
 ): Promise<string> {
-  const dataURL = await resizeImage(file, 256)
+  const dataURL = await resizeImage(file, 800)
   await updateDoc(doc(db, 'participants', participantId), { photoURL: dataURL })
   return dataURL
 }

@@ -2,7 +2,6 @@ import { Link, useLocation } from 'react-router-dom'
 import { signOut } from 'firebase/auth'
 import { auth } from '@/services/firebase'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
-import { useParticipants } from '@/hooks/useParticipants'
 import { TrophyMark } from '@/components/shared/Logo'
 
 const NAV = [
@@ -16,12 +15,9 @@ const NAV = [
 export function Header() {
   const { pathname } = useLocation()
   const { firebaseUser, userRecord, isAdmin } = useCurrentUser()
-  const { participants } = useParticipants()
 
   const displayName = userRecord?.participantName ?? ''
   const initial = displayName.charAt(0).toUpperCase()
-  const participant = participants.find(p => p.id === userRecord?.participantId)
-  const photoURL = participant?.photoURL
 
   return (
     <header className="bg-navy-900 text-white sticky top-0 z-50" style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }}>
@@ -85,13 +81,9 @@ export function Header() {
             <>
               {displayName && (
                 <div className="hidden sm:flex items-center gap-2">
-                  {photoURL ? (
-                    <img src={photoURL} alt={displayName} className="w-7 h-7 rounded-full object-cover" />
-                  ) : (
-                    <div className="w-7 h-7 rounded-full bg-brand-600 flex items-center justify-center text-xs font-bold text-white">
-                      {initial}
-                    </div>
-                  )}
+                  <div className="w-7 h-7 rounded-full bg-brand-600 flex items-center justify-center text-xs font-bold text-white">
+                    {initial}
+                  </div>
                   <span className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.85)' }}>
                     {displayName}
                   </span>
