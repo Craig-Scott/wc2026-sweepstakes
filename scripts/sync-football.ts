@@ -99,8 +99,14 @@ async function syncMatches() {
 
 async function syncStandings() {
   console.log('Fetching standings…')
-  const data = await apiFetch(`/competitions/${COMPETITION}/standings`)
-  const standings = data.standings ?? []
+  let data: Record<string, unknown>
+  try {
+    data = await apiFetch(`/competitions/${COMPETITION}/standings`)
+  } catch (e) {
+    console.log(`  Standings not available yet (${(e as Error).message}) — skipping`)
+    return
+  }
+  const standings = (data.standings as unknown[]) ?? []
 
   let count = 0
   for (const group of standings) {
