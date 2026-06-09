@@ -41,6 +41,14 @@ function mapStatus(status: string): string {
   return map[status] ?? 'SCHEDULED'
 }
 
+// Normalize API TLA codes to match WC2026_TEAMS canonical codes used in admin/participant assignments
+function normalizeCode(tla: string): string {
+  const overrides: Record<string, string> = {
+    URY: 'URU', // football-data.org sometimes returns ISO alpha-3 instead of FIFA code
+  }
+  return overrides[tla] ?? tla
+}
+
 function mapStage(stage: string): string {
   const map: Record<string, string> = {
     GROUP_STAGE:         'GROUP',
@@ -69,8 +77,8 @@ async function syncMatches() {
   for (const m of matches) {
     const matchDoc: Record<string, unknown> = {
       id: m.id,
-      homeTeam: { code: m.homeTeam.tla ?? 'TBD', name: m.homeTeam.name ?? 'TBD' },
-      awayTeam: { code: m.awayTeam.tla ?? 'TBD', name: m.awayTeam.name ?? 'TBD' },
+      homeTeam: { code: normalizeCode(m.homeTeam.tla ?? 'TBD'), name: m.homeTeam.name ?? 'TBD' },
+      awayTeam: { code: normalizeCode(m.awayTeam.tla ?? 'TBD'), name: m.awayTeam.name ?? 'TBD' },
       status: mapStatus(m.status),
       score: {
         home: m.score?.fullTime?.home ?? null,
@@ -112,7 +120,7 @@ async function syncStandings() {
   for (const group of standings) {
     const groupCode = (group.group as string | undefined)?.replace('GROUP_', '') ?? '?'
     const table = (group.table as Record<string, unknown>[] | undefined ?? []).map((row: Record<string, unknown>, i: number) => ({
-      teamCode: (row.team as { tla?: string })?.tla ?? 'TBD',
+      teamCode: normalizeCode((row.team as { tla?: string })?.tla ?? 'TBD'),
       teamName: (row.team as { name?: string })?.name ?? 'TBD',
       position: i + 1,
       played: row.playedGames ?? 0,
