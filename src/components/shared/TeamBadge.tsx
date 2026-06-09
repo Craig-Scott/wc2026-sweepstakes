@@ -16,7 +16,7 @@ const FIFA_TO_ISO2: Record<string, string> = {
   VEN: 've', PAR: 'py', BOL: 'bo', CHI: 'cl', PER: 'pe',
   // CONCACAF
   USA: 'us', MEX: 'mx', CAN: 'ca', PAN: 'pa', JAM: 'jm', HON: 'hn',
-  HAI: 'ht', CUR: 'cw', CPV: 'cv', TRI: 'tt', CRC: 'cr', GUA: 'gt',
+  HAI: 'ht', CUR: 'cw', CUW: 'cw', CPV: 'cv', TRI: 'tt', CRC: 'cr', GUA: 'gt',
   // UEFA
   FRA: 'fr', ENG: 'gb-eng', GER: 'de', ESP: 'es', ITA: 'it', POR: 'pt',
   NED: 'nl', BEL: 'be', SUI: 'ch', DEN: 'dk', AUT: 'at', SCO: 'gb-sct',

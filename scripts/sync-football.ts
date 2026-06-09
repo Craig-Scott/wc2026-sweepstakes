@@ -106,12 +106,12 @@ async function syncStandings() {
     console.log(`  Standings not available yet (${(e as Error).message}) — skipping`)
     return
   }
-  const standings = (data.standings as unknown[]) ?? []
+  const standings = (data.standings as Record<string, unknown>[]) ?? []
 
   let count = 0
   for (const group of standings) {
-    const groupCode = group.group?.replace('GROUP_', '') ?? '?'
-    const table = (group.table ?? []).map((row: Record<string, unknown>, i: number) => ({
+    const groupCode = (group.group as string | undefined)?.replace('GROUP_', '') ?? '?'
+    const table = (group.table as Record<string, unknown>[] | undefined ?? []).map((row: Record<string, unknown>, i: number) => ({
       teamCode: (row.team as { tla?: string })?.tla ?? 'TBD',
       teamName: (row.team as { name?: string })?.name ?? 'TBD',
       position: i + 1,

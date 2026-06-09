@@ -5,64 +5,68 @@
 export const WC2026_GROUPS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'] as const
 export type WC2026Group = typeof WC2026_GROUPS[number]
 
-// Full list of 48 WC 2026 qualified teams.
-// Fill in 'group' values after the official FIFA draw.
+// Full list of 48 WC 2026 qualified teams with official draw groups.
 export const WC2026_TEAMS: { code: string; name: string; group: string }[] = [
-  // CONMEBOL
-  { code: 'ARG', name: 'Argentina',   group: 'TBD' },
-  { code: 'BRA', name: 'Brazil',      group: 'TBD' },
-  { code: 'COL', name: 'Colombia',    group: 'TBD' },
-  { code: 'ECU', name: 'Ecuador',     group: 'TBD' },
-  { code: 'URU', name: 'Uruguay',     group: 'TBD' },
-  { code: 'VEN', name: 'Venezuela',   group: 'TBD' },
-  // CONCACAF
-  { code: 'USA', name: 'USA',         group: 'TBD' },
-  { code: 'MEX', name: 'Mexico',      group: 'TBD' },
-  { code: 'CAN', name: 'Canada',      group: 'TBD' },
-  { code: 'PAN', name: 'Panama',      group: 'TBD' },
-  { code: 'JAM', name: 'Jamaica',     group: 'TBD' },
-  { code: 'HON', name: 'Honduras',    group: 'TBD' },
-  // UEFA
-  { code: 'FRA', name: 'France',      group: 'TBD' },
-  { code: 'ENG', name: 'England',     group: 'TBD' },
-  { code: 'GER', name: 'Germany',     group: 'TBD' },
-  { code: 'ESP', name: 'Spain',       group: 'TBD' },
-  { code: 'ITA', name: 'Italy',       group: 'TBD' },
-  { code: 'POR', name: 'Portugal',    group: 'TBD' },
-  { code: 'NED', name: 'Netherlands', group: 'TBD' },
-  { code: 'BEL', name: 'Belgium',     group: 'TBD' },
-  { code: 'SUI', name: 'Switzerland', group: 'TBD' },
-  { code: 'DEN', name: 'Denmark',     group: 'TBD' },
-  { code: 'AUT', name: 'Austria',     group: 'TBD' },
-  { code: 'SCO', name: 'Scotland',    group: 'TBD' },
-  { code: 'CRO', name: 'Croatia',     group: 'TBD' },
-  { code: 'SRB', name: 'Serbia',      group: 'TBD' },
-  { code: 'SVN', name: 'Slovenia',    group: 'TBD' },
-  { code: 'TUR', name: 'Turkey',      group: 'TBD' },
-  { code: 'SVK', name: 'Slovakia',    group: 'TBD' },
-  { code: 'HUN', name: 'Hungary',     group: 'TBD' },
-  { code: 'UKR', name: 'Ukraine',     group: 'TBD' },
-  { code: 'GRE', name: 'Greece',      group: 'TBD' },
-  // CAF
-  { code: 'MAR', name: 'Morocco',     group: 'TBD' },
-  { code: 'SEN', name: 'Senegal',     group: 'TBD' },
-  { code: 'EGY', name: 'Egypt',       group: 'TBD' },
-  { code: 'CIV', name: 'Ivory Coast', group: 'TBD' },
-  { code: 'CMR', name: 'Cameroon',    group: 'TBD' },
-  { code: 'GHA', name: 'Ghana',       group: 'TBD' },
-  { code: 'TUN', name: 'Tunisia',     group: 'TBD' },
-  { code: 'MLI', name: 'Mali',        group: 'TBD' },
-  { code: 'ZAF', name: 'South Africa',group: 'TBD' },
-  // AFC
-  { code: 'JPN', name: 'Japan',       group: 'TBD' },
-  { code: 'KOR', name: 'South Korea', group: 'TBD' },
-  { code: 'IRN', name: 'Iran',        group: 'TBD' },
-  { code: 'AUS', name: 'Australia',   group: 'TBD' },
-  { code: 'SAU', name: 'Saudi Arabia',group: 'TBD' },
-  { code: 'JOR', name: 'Jordan',      group: 'TBD' },
-  { code: 'IRQ', name: 'Iraq',        group: 'TBD' },
-  // OFC / Playoff
-  { code: 'NZL', name: 'New Zealand', group: 'TBD' },
+  // Group A
+  { code: 'MEX', name: 'Mexico',             group: 'A' },
+  { code: 'CZE', name: 'Czechia',            group: 'A' },
+  { code: 'RSA', name: 'South Africa',       group: 'A' },
+  { code: 'KOR', name: 'South Korea',        group: 'A' },
+  // Group B
+  { code: 'CAN', name: 'Canada',             group: 'B' },
+  { code: 'BIH', name: 'Bosnia & Herz.',     group: 'B' },
+  { code: 'QAT', name: 'Qatar',              group: 'B' },
+  { code: 'SUI', name: 'Switzerland',        group: 'B' },
+  // Group C
+  { code: 'BRA', name: 'Brazil',             group: 'C' },
+  { code: 'HAI', name: 'Haiti',              group: 'C' },
+  { code: 'MAR', name: 'Morocco',            group: 'C' },
+  { code: 'SCO', name: 'Scotland',           group: 'C' },
+  // Group D
+  { code: 'USA', name: 'USA',                group: 'D' },
+  { code: 'AUS', name: 'Australia',          group: 'D' },
+  { code: 'PAR', name: 'Paraguay',           group: 'D' },
+  { code: 'TUR', name: 'Türkiye',            group: 'D' },
+  // Group E
+  { code: 'GER', name: 'Germany',            group: 'E' },
+  { code: 'ECU', name: 'Ecuador',            group: 'E' },
+  { code: 'CUW', name: 'Curaçao',            group: 'E' },
+  { code: 'CIV', name: 'Ivory Coast',        group: 'E' },
+  // Group F
+  { code: 'NED', name: 'Netherlands',        group: 'F' },
+  { code: 'JPN', name: 'Japan',              group: 'F' },
+  { code: 'SWE', name: 'Sweden',             group: 'F' },
+  { code: 'TUN', name: 'Tunisia',            group: 'F' },
+  // Group G
+  { code: 'BEL', name: 'Belgium',            group: 'G' },
+  { code: 'EGY', name: 'Egypt',              group: 'G' },
+  { code: 'IRN', name: 'Iran',               group: 'G' },
+  { code: 'NZL', name: 'New Zealand',        group: 'G' },
+  // Group H
+  { code: 'ESP', name: 'Spain',              group: 'H' },
+  { code: 'URU', name: 'Uruguay',            group: 'H' },
+  { code: 'KSA', name: 'Saudi Arabia',       group: 'H' },
+  { code: 'CPV', name: 'Cape Verde',         group: 'H' },
+  // Group I
+  { code: 'FRA', name: 'France',             group: 'I' },
+  { code: 'SEN', name: 'Senegal',            group: 'I' },
+  { code: 'NOR', name: 'Norway',             group: 'I' },
+  { code: 'IRQ', name: 'Iraq',               group: 'I' },
+  // Group J
+  { code: 'ARG', name: 'Argentina',          group: 'J' },
+  { code: 'AUT', name: 'Austria',            group: 'J' },
+  { code: 'ALG', name: 'Algeria',            group: 'J' },
+  { code: 'JOR', name: 'Jordan',             group: 'J' },
+  // Group K
+  { code: 'POR', name: 'Portugal',           group: 'K' },
+  { code: 'COL', name: 'Colombia',           group: 'K' },
+  { code: 'COD', name: 'DR Congo',           group: 'K' },
+  { code: 'UZB', name: 'Uzbekistan',         group: 'K' },
+  // Group L
+  { code: 'ENG', name: 'England',            group: 'L' },
+  { code: 'CRO', name: 'Croatia',            group: 'L' },
+  { code: 'PAN', name: 'Panama',             group: 'L' },
+  { code: 'GHA', name: 'Ghana',              group: 'L' },
 ]
 
 export const STAGE_LABELS: Record<string, string> = {
