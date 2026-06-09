@@ -103,7 +103,7 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
       <div className="space-y-3">
         {/* Teams + score */}
         <div className="relative flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col items-start gap-1">
             <TeamBadge code={match.homeTeam.code} name={match.homeTeam.name} size="lg" bold />
             {findOwner(match.homeTeam.code) && (
               <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
@@ -119,13 +119,13 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
               <span className="text-xs font-semibold text-red-500 tracking-wide">LIVE</span>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col items-end gap-1">
+            <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} size="lg" bold reverse />
             {findOwner(match.awayTeam.code) && (
               <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
                 {findOwner(match.awayTeam.code)}
               </span>
             )}
-            <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} size="lg" bold reverse />
           </div>
         </div>
 
@@ -210,7 +210,7 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
 
       {/* Teams + kickoff */}
       <div className="relative flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col items-start gap-1">
           <TeamBadge code={match.homeTeam.code} name={match.homeTeam.name} size="lg" bold />
           {findOwner(match.homeTeam.code) && (
             <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
@@ -221,13 +221,13 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
         <span className="absolute left-1/2 -translate-x-1/2 text-xs text-gray-500 pointer-events-none">
           {formatKickoff(match.kickoff)}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col items-end gap-1">
+          <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} size="lg" bold reverse />
           {findOwner(match.awayTeam.code) && (
             <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
               {findOwner(match.awayTeam.code)}
             </span>
           )}
-          <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} size="lg" bold reverse />
         </div>
       </div>
 
