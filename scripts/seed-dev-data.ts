@@ -34,7 +34,7 @@ const PARTICIPANTS = [
   { id: 'dan',       name: 'Dan',        teamCodes: [], hasPaid: false, uid: null },
   { id: 'aaronmcpo', name: 'Aaron Mcpo', teamCodes: [], hasPaid: false, uid: null },
   { id: 'david',     name: 'David',      teamCodes: [], hasPaid: false, uid: null },
-  { id: 'clarke',    name: 'Clarke',     teamCodes: [], hasPaid: false, uid: null },
+  { id: 'clarke',    name: 'Clark',      teamCodes: [], hasPaid: false, uid: null },
   { id: 'paul',      name: 'Paul',       teamCodes: [], hasPaid: false, uid: null },
   { id: 'richards',  name: 'Richard S',  teamCodes: [], hasPaid: false, uid: null },
   { id: 'marco',     name: 'Marco',      teamCodes: [], hasPaid: false, uid: null },
