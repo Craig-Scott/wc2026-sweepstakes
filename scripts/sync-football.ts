@@ -77,22 +77,22 @@ async function syncMatches() {
   for (const m of matches) {
     const matchDoc: Record<string, unknown> = {
       id: m.id,
-      homeTeam: { code: normalizeCode(m.homeTeam.tla ?? 'TBD'), name: m.homeTeam.name ?? 'TBD' },
-      awayTeam: { code: normalizeCode(m.awayTeam.tla ?? 'TBD'), name: m.awayTeam.name ?? 'TBD' },
+      homeTeam: { code: normalizeCode(m.homeTeam?.tla ?? 'TBD'), name: m.homeTeam?.name ?? 'TBD' },
+      awayTeam: { code: normalizeCode(m.awayTeam?.tla ?? 'TBD'), name: m.awayTeam?.name ?? 'TBD' },
       status: mapStatus(m.status),
       score: {
         home: m.score?.fullTime?.home ?? null,
         away: m.score?.fullTime?.away ?? null,
       },
-      kickoff: Timestamp.fromDate(new Date(m.utcDate)),
-      stage: mapStage(m.stage),
+      kickoff: m.utcDate ? Timestamp.fromDate(new Date(m.utcDate)) : null,
+      stage: mapStage(m.stage ?? ''),
       group: m.group?.replace('GROUP_', '') ?? null,
       round: m.matchday ? `Matchday ${m.matchday}` : null,
       updatedAt: Timestamp.now(),
     }
 
     if (DRY_RUN) {
-      console.log(`  [DRY] ${m.id}: ${m.homeTeam.name} vs ${m.awayTeam.name} (${m.status})`)
+      console.log(`  [DRY] ${m.id}: ${m.homeTeam?.name ?? 'TBD'} vs ${m.awayTeam?.name ?? 'TBD'} (${m.status})`)
     } else {
       const ref = db.collection('matches').doc(String(m.id))
       // Preserve existing admin-entered scorers/cards — only update API-sourced fields
@@ -187,15 +187,26 @@ async function calculatePredictionPoints() {
 
 async function main() {
   console.log(`\n=== Football Data Sync${DRY_RUN ? ' (DRY RUN)' : ''} ===\n`)
-  try {
-    await syncMatches()
-    await syncStandings()
-    await calculatePredictionPoints()
-    console.log('\n✓ Sync complete')
-  } catch (e) {
-    console.error('Sync failed:', e)
+  let failed = false
+
+  for (const [name, fn] of [
+    ['syncMatches', syncMatches],
+    ['syncStandings', syncStandings],
+    ['calculatePredictionPoints', calculatePredictionPoints],
+  ] as [string, () => Promise<void>][]) {
+    try {
+      await fn()
+    } catch (e) {
+      console.error(`\n✗ ${name} failed:`, e)
+      failed = true
+    }
+  }
+
+  if (failed) {
+    console.error('\nSync finished with errors')
     process.exit(1)
   }
+  console.log('\n✓ Sync complete')
 }
 
 main()
