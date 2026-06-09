@@ -37,7 +37,7 @@ export function PrizeBreakdown() {
 
   const amounts = calculatePrizeAmounts(config, participants)
   const paidCount = participants.filter(p => p.hasPaid).length
-  const prizePool = paidCount * config.entryFee
+  const prizePool = paidCount * config.entryFee + (config.additionalPrize ?? 0)
 
   return (
     <div className="card p-4">

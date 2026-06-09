@@ -195,12 +195,13 @@ function PrizeConfigEditor({ config }: { config: AppConfig }) {
   const { participants } = useParticipants()
   const [prizes, setPrizes] = useState(config.prizes)
   const [entryFee, setEntryFee] = useState(config.entryFee)
+  const [additionalPrize, setAdditionalPrize] = useState(config.additionalPrize ?? 0)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
   const sum = Object.values(prizes).reduce((a, b) => a + b, 0)
-  const prizePool = calculatePrizePool(participants, entryFee)
+  const prizePool = calculatePrizePool(participants, entryFee, additionalPrize)
   const PrizeRow = ({ k }: { k: keyof PrizePercentages }) => (
     <tr key={k}>
       <td className="py-2 text-sm text-gray-700">{PRIZE_LABELS[k]}</td>
@@ -230,14 +231,26 @@ function PrizeConfigEditor({ config }: { config: AppConfig }) {
   return (
     <div className="card p-4">
       <h2 className="font-semibold text-navy-900 mb-4">Prize Configuration</h2>
-      <div className="mb-4 flex items-center gap-3">
-        <label className="text-sm font-medium text-gray-700">Entry fee (£)</label>
-        <input
-          type="number"
-          value={entryFee}
-          onChange={e => { setEntryFee(Number(e.target.value)); setSaved(false) }}
-          className="border border-gray-200 rounded px-2 py-1 text-sm w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
-        />
+      <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <div className="flex items-center gap-3">
+          <label className="text-sm font-medium text-gray-700">Entry fee (£)</label>
+          <input
+            type="number"
+            value={entryFee}
+            onChange={e => { setEntryFee(Number(e.target.value)); setSaved(false) }}
+            className="border border-gray-200 rounded px-2 py-1 text-sm w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="text-sm font-medium text-gray-700">Additional prize (£)</label>
+          <input
+            type="number"
+            min={0}
+            value={additionalPrize}
+            onChange={e => { setAdditionalPrize(Number(e.target.value)); setSaved(false) }}
+            className="border border-gray-200 rounded px-2 py-1 text-sm w-24 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+        </div>
       </div>
       <table className="w-full text-sm mb-4">
         <thead>
@@ -273,7 +286,7 @@ function PrizeConfigEditor({ config }: { config: AppConfig }) {
           setSaving(true)
           setError(null)
           try {
-            await saveConfig({ ...config, entryFee, prizes })
+            await saveConfig({ ...config, entryFee, additionalPrize, prizes })
             setSaved(true)
           } catch (e) {
             setError(e instanceof Error ? e.message : 'Save failed')

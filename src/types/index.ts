@@ -110,6 +110,7 @@ export interface PrizePercentages {
 
 export interface AppConfig {
   entryFee: number
+  additionalPrize: number
   prizes: PrizePercentages
   tournamentYear: number
 }

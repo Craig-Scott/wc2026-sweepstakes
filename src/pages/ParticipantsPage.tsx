@@ -8,7 +8,7 @@ export function ParticipantsPage() {
   const { participants } = useParticipants()
   const { config } = useConfig()
   const paidCount = participants.filter(p => p.hasPaid).length
-  const prizePool = calculatePrizePool(participants, config.entryFee)
+  const prizePool = calculatePrizePool(participants, config.entryFee, config.additionalPrize ?? 0)
 
   return (
     <AppShell>

@@ -6,6 +6,7 @@ import type { AppConfig } from '@/types'
 
 export const DEFAULT_CONFIG: AppConfig = {
   entryFee: 10,
+  additionalPrize: 0,
   prizes: {
     winner:       30,
     runnerUp:     20,
