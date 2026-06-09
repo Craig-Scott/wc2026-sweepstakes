@@ -40,9 +40,11 @@ export function ParticipantsTable() {
               )}
             </div>
             {p.teamCodes.length > 0 ? (
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1.5">
                 {p.teamCodes.map(code => (
-                  <TeamBadge key={code} code={code} showName={false} size="sm" />
+                  <span key={code} className="inline-flex items-center gap-1 bg-gray-100 border border-gray-200 rounded-full pl-0.5 pr-2 py-0.5">
+                    <TeamBadge code={code} size="sm" />
+                  </span>
                 ))}
               </div>
             ) : (
