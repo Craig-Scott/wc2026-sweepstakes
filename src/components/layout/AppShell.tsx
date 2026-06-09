@@ -28,7 +28,7 @@ export function AppShell({ children, sidebar, wide }: Props) {
       {/* All page content sits above the watermark */}
       <div className="relative flex flex-col flex-1" style={{ zIndex: 1 }}>
         <Header />
-        <main className={`flex-1 ${maxWidth} mx-auto w-full px-5 py-8`}>
+        <main className={`flex-1 ${maxWidth} mx-auto w-full px-3 py-5 sm:px-5 sm:py-8`}>
           {sidebar ? (
             <div className="flex gap-8">
               <div className="flex-1 min-w-0 flex flex-col gap-6">{children}</div>
