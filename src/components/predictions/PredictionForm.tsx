@@ -5,6 +5,7 @@ import { formatKickoff } from '@/utils/dates'
 import { isMatchLocked, isCanonicalPrediction, predictionLabel } from '@/utils/predictions'
 import { savePrediction } from '@/services/predictions.service'
 import { useParticipants } from '@/hooks/useParticipants'
+import { getUKBroadcast } from '@/config/broadcastUK'
 
 interface Props {
   match: Match
@@ -215,6 +216,7 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
   }
 
   // ── Editable form ──────────────────────────────────────────────────────────
+  const ukChannel = getUKBroadcast(match.homeTeam.code, match.awayTeam.code)
   const sliderIndex = result === null ? -1 : RESULT_OPTIONS.findIndex(o => o.value === result)
 
   // Only slide when moving between two already-selected states.
@@ -236,9 +238,10 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
             </span>
           )}
         </div>
-        <span className="absolute left-1/2 -translate-x-1/2 text-xs text-gray-500 pointer-events-none">
-          {formatKickoff(match.kickoff)}
-        </span>
+        <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none text-center">
+          <span className="text-xs text-gray-500">{formatKickoff(match.kickoff)}</span>
+          {ukChannel && <span className="text-[10px] text-gray-400">{ukChannel}</span>}
+        </div>
         <div className="flex flex-col items-end gap-1">
           <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} size="md" smSize="lg" bold reverse nameClassName="max-w-[120px] sm:max-w-none truncate" />
           {findOwner(match.awayTeam.code) && (

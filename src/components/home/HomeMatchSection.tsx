@@ -10,12 +10,14 @@ import { HomeMatchSectionSkeleton } from '@/components/shared/Skeleton'
 import { formatKickoffFull } from '@/utils/dates'
 import { isCanonicalPrediction, predictionLabel } from '@/utils/predictions'
 import { STAGE_LABELS } from '@/config/tournament'
+import { getUKBroadcast } from '@/config/broadcastUK'
 import type { Match, Prediction, Participant } from '@/types'
 
 type Tab = 'predict' | 'results'
 
 function MatchPreview({ match, participants }: { match: Match; participants: Participant[] }) {
   const findOwner = (code: string) => participants.find(p => p.teamCodes.includes(code))?.name
+  const ukChannel = getUKBroadcast(match.homeTeam.code, match.awayTeam.code)
   return (
     <div className="relative flex items-center justify-between">
       <div className="flex items-center gap-2">
@@ -26,9 +28,10 @@ function MatchPreview({ match, participants }: { match: Match; participants: Par
           </span>
         )}
       </div>
-      <span className="absolute left-1/2 -translate-x-1/2 text-xs text-gray-400 pointer-events-none">
-        {formatKickoffFull(match.kickoff)}
-      </span>
+      <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none text-center">
+        <span className="text-xs text-gray-400">{formatKickoffFull(match.kickoff)}</span>
+        {ukChannel && <span className="text-[10px] text-gray-400">{ukChannel}</span>}
+      </div>
       <div className="flex items-center gap-2">
         {findOwner(match.awayTeam.code) && (
           <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
