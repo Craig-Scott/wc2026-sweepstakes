@@ -42,12 +42,13 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
     ? resultFromScores(existingPrediction.predictedHome, existingPrediction.predictedAway)
     : null
 
+  const initScoreEnabled = !!existingPrediction && !isCanonicalPrediction(existingPrediction.predictedHome, existingPrediction.predictedAway)
   const [result, setResult] = useState<ResultChoice | null>(initResult)
-  const [scoreEnabled, setScoreEnabled] = useState(
-    !!existingPrediction && !isCanonicalPrediction(existingPrediction.predictedHome, existingPrediction.predictedAway),
-  )
+  const [scoreEnabled, setScoreEnabled] = useState(initScoreEnabled)
   const [homeScore, setHomeScore] = useState(existingPrediction?.predictedHome ?? 0)
   const [awayScore, setAwayScore] = useState(existingPrediction?.predictedAway ?? 0)
+  const [homeScoreInput, setHomeScoreInput] = useState(initScoreEnabled ? String(existingPrediction!.predictedHome) : '')
+  const [awayScoreInput, setAwayScoreInput] = useState(initScoreEnabled ? String(existingPrediction!.predictedAway) : '')
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
 
 
@@ -59,7 +60,12 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
     setResult(resultFromScores(existingPrediction.predictedHome, existingPrediction.predictedAway))
     setHomeScore(existingPrediction.predictedHome)
     setAwayScore(existingPrediction.predictedAway)
-    setScoreEnabled(!isCanonicalPrediction(existingPrediction.predictedHome, existingPrediction.predictedAway))
+    const nonCanonical = !isCanonicalPrediction(existingPrediction.predictedHome, existingPrediction.predictedAway)
+    setScoreEnabled(nonCanonical)
+    if (nonCanonical) {
+      setHomeScoreInput(String(existingPrediction.predictedHome))
+      setAwayScoreInput(String(existingPrediction.predictedAway))
+    }
   }, [existingPrediction])
 
   const doSave = async (home: number, away: number) => {
@@ -85,14 +91,26 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
     setResult(choice)
     setHomeScore(h)
     setAwayScore(a)
+    setHomeScoreInput('')
+    setAwayScoreInput('')
     setScoreEnabled(false)
     doSave(h, a)
   }
 
-  const handleScoreChange = (home: number, away: number) => {
-    setHomeScore(home)
-    setAwayScore(away)
-    setResult(resultFromScores(home, away))
+  const handleScoreInputChange = (field: 'home' | 'away', raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 2)
+    const num = digits === '' ? 0 : Math.min(20, parseInt(digits))
+    const h = field === 'home' ? num : homeScore
+    const a = field === 'away' ? num : awayScore
+    if (field === 'home') setHomeScoreInput(digits)
+    else setAwayScoreInput(digits)
+    setHomeScore(h)
+    setAwayScore(a)
+    setResult(resultFromScores(h, a))
+  }
+
+  const handleScoreBlur = () => {
+    if (scoreEnabled && result !== null) doSave(homeScore, awayScore)
   }
 
   // ── In-play locked state ──────────────────────────────────────────────────
@@ -265,7 +283,9 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
         <button
           onClick={() => {
             setScoreEnabled(true)
-            if (!result) { setHomeScore(0); setAwayScore(0); setResult('draw') }
+            setHomeScoreInput('')
+            setAwayScoreInput('')
+            if (!result) setResult('draw')
           }}
           className="w-full h-10 flex items-center justify-center bg-gray-100 rounded-xl text-xs font-medium text-gray-400 hover:text-gray-600 transition-colors duration-150"
         >
@@ -274,22 +294,24 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
       ) : (
         <div className="flex h-10 items-center justify-center gap-4 bg-gray-100 rounded-xl">
           <input
-            type="number" min={0} max={20} value={homeScore}
-            onChange={e => handleScoreChange(Math.max(0, parseInt(e.target.value) || 0), awayScore)}
-            className="w-12 text-center text-lg font-bold bg-white border border-gray-200 rounded-lg py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2}
+            value={homeScoreInput} placeholder="0"
+            onChange={e => handleScoreInputChange('home', e.target.value)}
+            onBlur={handleScoreBlur}
+            className="w-12 text-center text-lg font-bold bg-white border border-gray-200 rounded-lg py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
           <span className="text-gray-400 font-medium">–</span>
           <input
-            type="number" min={0} max={20} value={awayScore}
-            onChange={e => handleScoreChange(homeScore, Math.max(0, parseInt(e.target.value) || 0))}
-            className="w-12 text-center text-lg font-bold bg-white border border-gray-200 rounded-lg py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2}
+            value={awayScoreInput} placeholder="0"
+            onChange={e => handleScoreInputChange('away', e.target.value)}
+            onBlur={handleScoreBlur}
+            className="w-12 text-center text-lg font-bold bg-white border border-gray-200 rounded-lg py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
       )}
 
-      {saveStatus === 'error' && (
-        <p className="text-xs text-red-500 text-center">Failed to save — please try again</p>
-      )}
+      {saveStatus === 'error' && <p className="text-xs text-red-500 text-center">Failed to save — please try again</p>}
     </div>
   )
 }

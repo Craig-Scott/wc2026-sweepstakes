@@ -12,7 +12,7 @@ export function GroupTable({ standing }: Props) {
   return (
     <div className="card overflow-hidden">
       <div className="bg-gray-50 px-3 py-2.5 border-b border-gray-200">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Group {standing.group}</h3>
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-widest">{standing.group}</h3>
       </div>
       <table className="w-full text-xs">
         <thead>
