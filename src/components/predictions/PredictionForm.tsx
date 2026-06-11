@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Match, Prediction } from '@/types'
 import { TeamBadge } from '@/components/shared/TeamBadge'
-import { formatKickoff } from '@/utils/dates'
+import { formatKickoffDate, formatKickoffTime } from '@/utils/dates'
 import { isMatchLocked, isCanonicalPrediction, predictionLabel } from '@/utils/predictions'
 import { savePrediction } from '@/services/predictions.service'
 import { useParticipants } from '@/hooks/useParticipants'
@@ -239,8 +239,10 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
           )}
         </div>
         <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none text-center">
-          <span className="text-xs text-gray-500">{formatKickoff(match.kickoff)}</span>
-          {ukChannel && <span className="text-[10px] text-gray-400">{ukChannel}</span>}
+          <span className="text-xs text-gray-500">{formatKickoffDate(match.kickoff)}</span>
+          <span className="text-xs text-gray-500">
+            {formatKickoffTime(match.kickoff)}{ukChannel ? ` – ${ukChannel}` : ''}
+          </span>
         </div>
         <div className="flex flex-col items-end gap-1">
           <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} size="md" smSize="lg" bold reverse nameClassName="max-w-[120px] sm:max-w-none truncate" />

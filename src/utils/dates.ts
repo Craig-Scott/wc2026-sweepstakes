@@ -11,6 +11,18 @@ export function formatKickoffFull(timestamp: Timestamp): string {
   return format(date, 'EEEE d MMMM yyyy, HH:mm')
 }
 
+export function formatKickoffDate(timestamp: Timestamp): string {
+  return format(timestamp.toDate(), 'EEE d MMM')
+}
+
+export function formatKickoffDateFull(timestamp: Timestamp): string {
+  return format(timestamp.toDate(), 'EEEE d MMMM yyyy')
+}
+
+export function formatKickoffTime(timestamp: Timestamp): string {
+  return format(timestamp.toDate(), 'HH:mm')
+}
+
 export function timeUntilKickoff(timestamp: Timestamp): string {
   const date = timestamp.toDate()
   if (isPast(date)) return 'Started'

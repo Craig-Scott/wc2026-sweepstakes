@@ -7,7 +7,7 @@ import { usePredictionsForParticipant } from '@/hooks/usePredictions'
 import { PredictionForm } from '@/components/predictions/PredictionForm'
 import { TeamBadge } from '@/components/shared/TeamBadge'
 import { HomeMatchSectionSkeleton } from '@/components/shared/Skeleton'
-import { formatKickoffFull } from '@/utils/dates'
+import { formatKickoffFull, formatKickoffDateFull, formatKickoffTime } from '@/utils/dates'
 import { isCanonicalPrediction, predictionLabel } from '@/utils/predictions'
 import { STAGE_LABELS } from '@/config/tournament'
 import { getUKBroadcast } from '@/config/broadcastUK'
@@ -29,8 +29,10 @@ function MatchPreview({ match, participants }: { match: Match; participants: Par
         )}
       </div>
       <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none text-center">
-        <span className="text-xs text-gray-400">{formatKickoffFull(match.kickoff)}</span>
-        {ukChannel && <span className="text-[10px] text-gray-400">{ukChannel}</span>}
+        <span className="text-xs text-gray-400">{formatKickoffDateFull(match.kickoff)}</span>
+        <span className="text-xs text-gray-400">
+          {formatKickoffTime(match.kickoff)}{ukChannel ? ` – ${ukChannel}` : ''}
+        </span>
       </div>
       <div className="flex items-center gap-2">
         {findOwner(match.awayTeam.code) && (
