@@ -1,6 +1,10 @@
 name: Sync Football Data
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/sync-football.ts'
   schedule:
     # Every minute during UK match hours: 17:00–midnight BST (16:00–22:59 UTC)
     # Combined with the double-run step below this gives ~30s effective frequency
