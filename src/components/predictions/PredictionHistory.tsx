@@ -58,7 +58,7 @@ export function PredictionHistory({ predictions, matchesById }: Props) {
                 <td className="py-2 text-center">
                   {pred.pointsAwarded !== null ? (
                     <span className={`font-bold ${
-                      pred.pointsAwarded === 6 ? 'text-brand-600'
+                      pred.pointsAwarded === 9 ? 'text-brand-600'
                       : pred.pointsAwarded === 3 ? 'text-blue-600'
                       : 'text-gray-500'
                     }`}>

@@ -7,7 +7,8 @@ export function calculatePoints(prediction: Prediction, match: Match): number {
   const { predictedHome, predictedAway } = prediction
   const { home, away } = match.score
 
-  if (predictedHome === home && predictedAway === away) return 6
+  // Canonical (result-only) picks can never earn the 6-pt exact-score bonus.
+  if (!isCanonicalPrediction(predictedHome, predictedAway) && predictedHome === home && predictedAway === away) return 9
 
   const actualResult = Math.sign(home - away)
   const predictedResult = Math.sign(predictedHome - predictedAway)
@@ -31,10 +32,12 @@ export function formatScore(home: number | null, away: number | null): string {
   return `${home} – ${away}`
 }
 
-// A canonical prediction is the minimal result-only marker (1-0, 0-0, 0-1).
-// Anything else means the user explicitly chose an exact score.
+// Canonical (result-only) sentinels use 99, which is unreachable via the score inputs
+// (capped at 20) and impossible in a real match. This guarantees exact-score predictions
+// (including 1-0 and 0-1) are always distinguishable, and canonical picks can never earn
+// the 6-pt exact-score bonus in calculatePoints.
 export function isCanonicalPrediction(home: number, away: number): boolean {
-  return (home === 1 && away === 0) || (home === 0 && away === 0) || (home === 0 && away === 1)
+  return (home === 99 && away === 0) || (home === 99 && away === 99) || (home === 0 && away === 99)
 }
 
 export function predictionLabel(

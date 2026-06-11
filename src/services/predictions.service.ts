@@ -65,7 +65,7 @@ export async function buildLeaderboard(participants: Participant[]): Promise<Lea
       totalPoints: 0, correctResults: 0, exactScores: 0, count: 0,
     }
     entry.totalPoints += pred.pointsAwarded
-    if (pred.pointsAwarded === 6) entry.exactScores++
+    if (pred.pointsAwarded === 9) entry.exactScores++
     if (pred.pointsAwarded >= 3) entry.correctResults++
     entry.count++
     byParticipant.set(pred.participantId, entry)

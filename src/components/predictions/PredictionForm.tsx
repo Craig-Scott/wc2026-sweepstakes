@@ -28,9 +28,9 @@ function resultFromScores(home: number, away: number): ResultChoice {
 }
 
 function canonicalScores(result: ResultChoice): [number, number] {
-  if (result === 'home') return [1, 0]
-  if (result === 'draw') return [0, 0]
-  return [0, 1]
+  if (result === 'home') return [99, 0]
+  if (result === 'draw') return [99, 99]
+  return [0, 99]
 }
 
 
@@ -200,7 +200,7 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
             </span>
             {existingPrediction.pointsAwarded !== null && (
               <span className={`font-bold shrink-0 ml-3 ${
-                existingPrediction.pointsAwarded === 6 ? 'text-brand-600'
+                existingPrediction.pointsAwarded === 9 ? 'text-brand-600'
                 : existingPrediction.pointsAwarded === 3 ? 'text-blue-600'
                 : 'text-gray-400'
               }`}>

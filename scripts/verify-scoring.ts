@@ -20,8 +20,12 @@ const db = getFirestore()
 
 // ── Scoring function (mirrors both src/utils/predictions.ts and sync-football.ts) ──
 
+function isCanonical(h: number, a: number): boolean {
+  return (h === 99 && a === 0) || (h === 99 && a === 99) || (h === 0 && a === 99)
+}
+
 function score(pH: number, pA: number, aH: number, aA: number): number {
-  if (pH === aH && pA === aA) return 6
+  if (!isCanonical(pH, pA) && pH === aH && pA === aA) return 9
   if (Math.sign(pH - pA) === Math.sign(aH - aA)) return 3
   return 0
 }
@@ -29,19 +33,22 @@ function score(pH: number, pA: number, aH: number, aA: number): number {
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
 const CASES: { label: string; pH: number; pA: number; aH: number; aA: number; want: number }[] = [
-  // Exact score → 6
-  { label: 'Exact home win (2-1)',      pH: 2, pA: 1, aH: 2, aA: 1, want: 6 },
-  { label: 'Exact draw (1-1)',          pH: 1, pA: 1, aH: 1, aA: 1, want: 6 },
-  { label: 'Exact away win (0-2)',      pH: 0, pA: 2, aH: 0, aA: 2, want: 6 },
-  { label: 'Exact 0-0',                pH: 0, pA: 0, aH: 0, aA: 0, want: 6 },
+  // Exact score → 9
+  { label: 'Exact home win (2-1)',      pH: 2, pA: 1, aH: 2, aA: 1, want: 9 },
+  { label: 'Exact draw (1-1)',          pH: 1, pA: 1, aH: 1, aA: 1, want: 9 },
+  { label: 'Exact away win (0-2)',      pH: 0, pA: 2, aH: 0, aA: 2, want: 9 },
+  { label: 'Exact 0-0',                pH: 0, pA: 0, aH: 0, aA: 0, want: 9 },
+  { label: 'Exact 1-0',                pH: 1, pA: 0, aH: 1, aA: 0, want: 9 },
+  { label: 'Exact 0-1',                pH: 0, pA: 1, aH: 0, aA: 1, want: 9 },
   // Correct result only → 3
   { label: 'Right home win, wrong score',  pH: 1, pA: 0, aH: 3, aA: 1, want: 3 },
   { label: 'Right draw, wrong score',      pH: 1, pA: 1, aH: 2, aA: 2, want: 3 },
   { label: 'Right away win, wrong score',  pH: 0, pA: 1, aH: 1, aA: 3, want: 3 },
-  // Canonical result-only predictions → treat as result predictions
-  { label: 'Canonical home (1-0) vs 2-1', pH: 1, pA: 0, aH: 2, aA: 1, want: 3 },
-  { label: 'Canonical draw (0-0) vs 1-1', pH: 0, pA: 0, aH: 1, aA: 1, want: 3 },
-  { label: 'Canonical away (0-1) vs 0-2', pH: 0, pA: 1, aH: 0, aA: 2, want: 3 },
+  // Canonical (result-only) sentinels → max 3 pts, never 9
+  { label: 'Canonical home (99-0) vs 2-1',   pH: 99, pA: 0,  aH: 2, aA: 1, want: 3 },
+  { label: 'Canonical draw (99-99) vs 1-1',  pH: 99, pA: 99, aH: 1, aA: 1, want: 3 },
+  { label: 'Canonical away (0-99) vs 0-2',   pH: 0,  pA: 99, aH: 0, aA: 2, want: 3 },
+  { label: 'Canonical home (99-0) vs 0-2',   pH: 99, pA: 0,  aH: 0, aA: 2, want: 0 },
   // Wrong result → 0
   { label: 'Predicted home win, actual draw',  pH: 2, pA: 0, aH: 1, aA: 1, want: 0 },
   { label: 'Predicted draw, actual away win',  pH: 0, pA: 0, aH: 0, aA: 1, want: 0 },
@@ -99,7 +106,7 @@ for (const doc of predSnap.docs) {
 
   const entry = leaderboard.get(pred.participantId)!
   entry.points += expected
-  if (expected === 6) entry.exact++
+  if (expected === 9) entry.exact++
   else if (expected === 3) entry.result++
   else entry.wrong++
 

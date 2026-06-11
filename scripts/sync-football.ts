@@ -166,8 +166,9 @@ async function calculatePredictionPoints() {
     if (score.home === null || score.away === null) continue
 
     let points = 0
-    if (pred.predictedHome === score.home && pred.predictedAway === score.away) {
-      points = 6
+    const isCanonical = (h: number, a: number) => (h === 99 && a === 0) || (h === 99 && a === 99) || (h === 0 && a === 99)
+    if (!isCanonical(pred.predictedHome, pred.predictedAway) && pred.predictedHome === score.home && pred.predictedAway === score.away) {
+      points = 9
     } else {
       const actualResult = Math.sign(score.home - score.away)
       const predResult = Math.sign(pred.predictedHome - pred.predictedAway)

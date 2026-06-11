@@ -56,7 +56,7 @@ function ResultWithPrediction({ match, prediction, participants }: {
   const findOwner = (code: string) => participants.find(p => p.teamCodes.includes(code))?.name
 
   const pts = prediction?.pointsAwarded ?? null
-  const ptsColor = pts === 6 ? 'text-brand-600' : pts === 3 ? 'text-blue-600' : 'text-gray-400'
+  const ptsColor = pts === 9 ? 'text-brand-600' : pts === 3 ? 'text-blue-600' : 'text-gray-400'
 
   const predText = prediction
     ? predictionLabel(
@@ -70,13 +70,13 @@ function ResultWithPrediction({ match, prediction, participants }: {
   const predIsScore = prediction && !isCanonicalPrediction(prediction.predictedHome, prediction.predictedAway)
 
   const outcome =
-    pts === 6 ? 'Exact score ✓'
+    pts === 9 ? 'Exact score ✓'
     : pts === 3 ? 'Correct result ✓'
     : pts === 0 ? 'Incorrect ✗'
     : null
 
   const outcomeColor =
-    pts === 6 ? 'text-brand-600'
+    pts === 9 ? 'text-brand-600'
     : pts === 3 ? 'text-blue-600'
     : pts === 0 ? 'text-red-400'
     : 'text-gray-400'
