@@ -1,7 +1,6 @@
 import type { Match } from '@/types'
 import { TeamBadge } from '@/components/shared/TeamBadge'
 import { useParticipants } from '@/hooks/useParticipants'
-import { formatKickoffFull } from '@/utils/dates'
 import { STAGE_LABELS } from '@/config/tournament'
 
 interface Props {
@@ -21,30 +20,35 @@ export function MatchResultCard({ match }: Props) {
 
   return (
     <div className="card p-4">
-      <div className="flex items-center justify-between mb-3 text-xs text-gray-500">
-        <span>{STAGE_LABELS[match.stage] ?? match.stage}{match.group ? ` · Group ${match.group}` : ''}</span>
-        <span>{formatKickoffFull(match.kickoff)}</span>
+      <div className="text-xs text-gray-500 mb-3">
+        {STAGE_LABELS[match.stage] ?? match.stage}{match.group ? ` · Group ${match.group}` : ''}
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center justify-between">
         {/* Home */}
-        <div className={`flex-1 flex flex-col items-start gap-0.5 ${homeWin ? 'opacity-100' : 'opacity-60'}`}>
-          <TeamBadge code={match.homeTeam.code} name={match.homeTeam.name} />
+        <div className={`flex flex-col items-start gap-1 ${homeWin ? 'opacity-100' : 'opacity-50'}`}>
+          <TeamBadge code={match.homeTeam.code} name={match.homeTeam.name} size="md" smSize="lg" bold nameClassName="max-w-[120px] sm:max-w-none truncate" />
           {homeParticipant && (
-            <span className="text-xs text-gray-500 ml-1">{homeParticipant.name}</span>
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
+              {homeParticipant.name}
+            </span>
           )}
         </div>
 
         {/* Score */}
-        <div className="font-display font-bold tabular-nums text-5xl text-navy-900 leading-none">
-          {match.score.home} – {match.score.away}
+        <div className="text-center shrink-0 px-2">
+          <div className="font-display font-bold tabular-nums text-4xl text-navy-900 leading-none">
+            {match.score.home ?? '–'} <span className="text-gray-300">–</span> {match.score.away ?? '–'}
+          </div>
         </div>
 
         {/* Away */}
-        <div className={`flex-1 flex flex-col items-end gap-0.5 ${awayWin ? 'opacity-100' : 'opacity-60'}`}>
-          <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} />
+        <div className={`flex flex-col items-end gap-1 ${awayWin ? 'opacity-100' : 'opacity-50'}`}>
+          <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} size="md" smSize="lg" bold reverse nameClassName="max-w-[120px] sm:max-w-none truncate" />
           {awayParticipant && (
-            <span className="text-xs text-gray-500 mr-1">{awayParticipant.name}</span>
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
+              {awayParticipant.name}
+            </span>
           )}
         </div>
       </div>

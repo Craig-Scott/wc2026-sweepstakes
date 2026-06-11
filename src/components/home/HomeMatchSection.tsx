@@ -201,7 +201,7 @@ export function HomeMatchSection() {
                   : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
               }`}
             >
-              {t === 'predict' ? 'Predict' : 'Results'}
+              {t === 'predict' ? 'Predict' : 'Prediction Results'}
             </button>
           ))}
         </div>

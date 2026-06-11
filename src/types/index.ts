@@ -57,6 +57,7 @@ export interface Match {
   stage: MatchStage
   group: string | null
   round: string | null
+  currentMinute?: number | null
   scorers: GoalScorer[]
   cards: Card[]
   updatedAt: Timestamp

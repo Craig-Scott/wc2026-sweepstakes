@@ -19,7 +19,7 @@ export function PredictionsPage() {
 
   const isLoading = matchesLoading || predsLoading
 
-  const upcoming = matches.filter(m => ['SCHEDULED', 'TIMED', 'IN_PLAY'].includes(m.status))
+  const upcoming = matches.filter(m => ['SCHEDULED', 'TIMED', 'IN_PLAY', 'PAUSED'].includes(m.status))
   const matchesById = new Map<number, Match>(matches.map(m => [m.id, m]))
   const predsByMatch = new Map(predictions.map(p => [p.matchId, p]))
 
@@ -76,7 +76,7 @@ export function PredictionsPage() {
         {/* Prediction history */}
         {predictions.length > 0 && (
           <div className="mt-8">
-            <h2 className="text-lg font-semibold text-navy-900 mb-4">Your Prediction History</h2>
+            <h2 className="text-lg font-semibold text-navy-900 mb-4">Prediction Results</h2>
             <div className="card p-4">
               <PredictionHistory predictions={predictions} matchesById={matchesById} />
             </div>

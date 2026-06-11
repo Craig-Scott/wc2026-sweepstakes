@@ -35,7 +35,7 @@ async function apiFetch(path: string) {
 function mapStatus(status: string): string {
   const map: Record<string, string> = {
     TIMED: 'TIMED', SCHEDULED: 'SCHEDULED',
-    IN_PLAY: 'IN_PLAY', PAUSED: 'IN_PLAY',
+    IN_PLAY: 'IN_PLAY', PAUSED: 'PAUSED',
     FINISHED: 'FINISHED', POSTPONED: 'POSTPONED', CANCELLED: 'CANCELLED',
   }
   return map[status] ?? 'SCHEDULED'
@@ -65,38 +65,188 @@ function mapStage(stage: string): string {
   return map[stage] ?? stage
 }
 
+type ESPNMatchData = { home: number; away: number; eventId: string }
+
+async function fetchESPNScores(): Promise<Map<string, ESPNMatchData>> {
+  const scores = new Map<string, ESPNMatchData>()
+  try {
+    const res = await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard')
+    const data = await res.json() as { events?: Record<string, unknown>[] }
+    const ACTIVE_STATUSES = ['STATUS_FULL_TIME', 'STATUS_IN_PROGRESS', 'STATUS_HALFTIME', 'STATUS_EXTRA_TIME', 'STATUS_PENALTY']
+    for (const event of data.events ?? []) {
+      const comp = (event.competitions as Record<string, unknown>[])?.[0]
+      if (!comp) continue
+      const statusName = ((comp.status as Record<string, unknown>)?.type as Record<string, unknown>)?.name as string
+      if (!ACTIVE_STATUSES.includes(statusName)) continue
+      const competitors = comp.competitors as Record<string, unknown>[]
+      const homeTeam = competitors?.find(t => t.homeAway === 'home')
+      const awayTeam = competitors?.find(t => t.homeAway === 'away')
+      if (!homeTeam || !awayTeam) continue
+      const homeScore = parseInt(homeTeam.score as string, 10)
+      const awayScore = parseInt(awayTeam.score as string, 10)
+      if (isNaN(homeScore) || isNaN(awayScore)) continue
+      const homeAbb = (homeTeam.team as Record<string, unknown>)?.abbreviation as string
+      const awayAbb = (awayTeam.team as Record<string, unknown>)?.abbreviation as string
+      scores.set(`${homeAbb}|${awayAbb}`, { home: homeScore, away: awayScore, eventId: event.id as string })
+    }
+    console.log(`  ESPN scores fetched: ${scores.size} active matches`)
+  } catch (e) {
+    console.warn('  ESPN score fetch failed (non-fatal):', (e as Error).message)
+  }
+  return scores
+}
+
+type ESPNGoal = { player: string; team: string; minute: number; isOwnGoal: boolean; isPenalty: boolean; distanceMeters: null }
+type ESPNCard = { player: string; team: string; minute: number; type: 'YELLOW' | 'RED' | 'YELLOW_RED' }
+
+async function fetchESPNEventDetails(eventId: string): Promise<{ scorers: ESPNGoal[]; cards: ESPNCard[] }> {
+  try {
+    const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/summary?event=${eventId}`)
+    const data = await res.json() as { keyEvents?: Record<string, unknown>[] }
+    const keyEvents = data.keyEvents ?? []
+
+    const scorers: ESPNGoal[] = keyEvents
+      .filter(e => (e.scoringPlay === true))
+      .map(e => {
+        const type = (e.type as Record<string, unknown>)?.type as string
+        const minute = Math.round(((e.clock as Record<string, unknown>)?.value as number ?? 0) / 60)
+        const teamName = (e.team as Record<string, unknown>)?.displayName as string ?? ''
+        const participants = (e.participants as Record<string, unknown>[]) ?? []
+        const player = (participants[0]?.athlete as Record<string, unknown>)?.displayName as string ?? 'Unknown'
+        return {
+          player,
+          team: teamName,
+          minute,
+          distanceMeters: null,
+          isOwnGoal: type === 'own-goal',
+          isPenalty: type === 'penalty-goal' || type === 'penalty',
+        }
+      })
+
+    const cards: ESPNCard[] = keyEvents
+      .filter(e => ['yellow-card', 'red-card', 'yellow-red-card'].includes((e.type as Record<string, unknown>)?.type as string))
+      .map(e => {
+        const type = (e.type as Record<string, unknown>)?.type as string
+        const minute = Math.round(((e.clock as Record<string, unknown>)?.value as number ?? 0) / 60)
+        const teamName = (e.team as Record<string, unknown>)?.displayName as string ?? ''
+        const participants = (e.participants as Record<string, unknown>[]) ?? []
+        const player = (participants[0]?.athlete as Record<string, unknown>)?.displayName as string ?? 'Unknown'
+        return {
+          player,
+          team: teamName,
+          minute,
+          type: type === 'red-card' ? 'RED' : type === 'yellow-red-card' ? 'YELLOW_RED' : 'YELLOW',
+        }
+      })
+
+    return { scorers, cards }
+  } catch (e) {
+    console.warn(`  ESPN event detail fetch failed for ${eventId} (non-fatal):`, (e as Error).message)
+    return { scorers: [], cards: [] }
+  }
+}
+
 async function syncMatches() {
   console.log('Fetching matches…')
-  const data = await apiFetch(`/competitions/${COMPETITION}/matches`)
+  const [data, espnScores, existingSnap] = await Promise.all([
+    apiFetch(`/competitions/${COMPETITION}/matches`),
+    fetchESPNScores(),
+    db.collection('matches').get(),
+  ])
   const matches = data.matches ?? []
   console.log(`  ${matches.length} matches returned`)
+
+  // Build a map of existing Firestore scorers so we can preserve admin-entered distanceMeters
+  const existingScorers = new Map<string, Record<string, unknown>[]>()
+  for (const snap of existingSnap.docs) {
+    const scorers = (snap.data().scorers as Record<string, unknown>[] | undefined) ?? []
+    existingScorers.set(snap.id, scorers)
+  }
 
   const batch = db.batch()
   let count = 0
 
   for (const m of matches) {
+    const homeCode = normalizeCode(m.homeTeam?.tla ?? 'TBD')
+    const awayCode = normalizeCode(m.awayTeam?.tla ?? 'TBD')
+    const espnScore = espnScores.get(`${homeCode}|${awayCode}`)
+
+    const apiHome = m.score?.fullTime?.home ?? null
+    const apiAway = m.score?.fullTime?.away ?? null
+    const scoreHome = apiHome ?? espnScore?.home ?? null
+    const scoreAway = apiAway ?? espnScore?.away ?? null
+
+    if (espnScore && apiHome === null) {
+      console.log(`  [ESPN] ${homeCode} ${scoreHome}-${scoreAway} ${awayCode}`)
+    }
+
+    const apiGoals = (m.goals ?? []) as Record<string, unknown>[]
+    const apiBookings = (m.bookings ?? []) as Record<string, unknown>[]
+
+    let scorers: unknown[]
+    let cards: unknown[]
+
+    const preserved = existingScorers.get(String(m.id)) ?? []
+    const mergeDistance = (player: string, minute: number): number | null => {
+      const ex = preserved.find(s => s.player === player && s.minute === minute)
+      return (ex?.distanceMeters as number | null) ?? null
+    }
+
+    if (apiGoals.length > 0) {
+      scorers = apiGoals.map(g => {
+        const player = (g.scorer as { name?: string })?.name ?? 'Unknown'
+        const minute = (g.minute as number) ?? 0
+        return {
+          player,
+          team: normalizeCode((g.team as { tla?: string })?.tla ?? ''),
+          minute,
+          distanceMeters: mergeDistance(player, minute),
+          isOwnGoal: g.type === 'OWN_GOAL',
+          isPenalty: g.type === 'PENALTY',
+        }
+      })
+      cards = apiBookings.map(b => ({
+        player: (b.player as { name?: string })?.name ?? 'Unknown',
+        team: normalizeCode((b.team as { tla?: string })?.tla ?? ''),
+        minute: (b.minute as number) ?? 0,
+        type: b.card === 'YELLOW_CARD' ? 'YELLOW' : b.card === 'RED_CARD' ? 'RED' : 'YELLOW_RED',
+      }))
+    } else if (espnScore?.eventId && mapStatus(m.status) === 'FINISHED') {
+      const espnDetails = await fetchESPNEventDetails(espnScore.eventId)
+      scorers = espnDetails.scorers.map(s => ({ ...s, distanceMeters: mergeDistance(s.player, s.minute) }))
+      cards = espnDetails.cards
+      if (scorers.length > 0) {
+        console.log(`  [ESPN] Goals for ${homeCode} vs ${awayCode}: ${scorers.map((s) => `${(s as {player:string;minute:number}).player} ${(s as {player:string;minute:number}).minute}'`).join(', ')}`)
+      }
+    } else {
+      scorers = []
+      cards = []
+    }
+
     const matchDoc: Record<string, unknown> = {
       id: m.id,
-      homeTeam: { code: normalizeCode(m.homeTeam?.tla ?? 'TBD'), name: m.homeTeam?.name ?? 'TBD' },
-      awayTeam: { code: normalizeCode(m.awayTeam?.tla ?? 'TBD'), name: m.awayTeam?.name ?? 'TBD' },
+      homeTeam: { code: homeCode, name: m.homeTeam?.name ?? 'TBD' },
+      awayTeam: { code: awayCode, name: m.awayTeam?.name ?? 'TBD' },
       status: mapStatus(m.status),
       score: {
-        // fullTime is null during live play; fall back to currentScore (in-play running score)
-        home: m.score?.fullTime?.home ?? m.score?.currentScore?.home ?? null,
-        away: m.score?.fullTime?.away ?? m.score?.currentScore?.away ?? null,
+        home: scoreHome,
+        away: scoreAway,
       },
       kickoff: m.utcDate ? Timestamp.fromDate(new Date(m.utcDate)) : null,
+      currentMinute: m.minute ?? null,
       stage: mapStage(m.stage ?? ''),
       group: m.group?.replace('GROUP_', '') ?? null,
       round: m.matchday ? `Matchday ${m.matchday}` : null,
+      scorers,
+      cards,
       updatedAt: Timestamp.now(),
     }
 
     if (DRY_RUN) {
-      console.log(`  [DRY] ${m.id}: ${m.homeTeam?.name ?? 'TBD'} vs ${m.awayTeam?.name ?? 'TBD'} (${m.status})`)
+      const scorerNames = scorers.map((s: { player: string; minute: number }) => `${s.player} ${s.minute}'`).join(', ')
+      console.log(`  [DRY] ${m.id}: ${m.homeTeam?.name ?? 'TBD'} vs ${m.awayTeam?.name ?? 'TBD'} (${m.status})${scorerNames ? ` | ${scorerNames}` : ''}`)
     } else {
       const ref = db.collection('matches').doc(String(m.id))
-      // Preserve existing admin-entered scorers/cards — only update API-sourced fields
       batch.set(ref, matchDoc, { merge: true })
     }
     count++

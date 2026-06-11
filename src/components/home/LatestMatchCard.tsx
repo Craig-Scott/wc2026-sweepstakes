@@ -2,7 +2,6 @@ import { useLatestMatch } from '@/hooks/useMatches'
 import { useParticipants } from '@/hooks/useParticipants'
 import { TeamBadge } from '@/components/shared/TeamBadge'
 import { LatestMatchSkeleton } from '@/components/shared/Skeleton'
-import { formatKickoffFull } from '@/utils/dates'
 import { STAGE_LABELS } from '@/config/tournament'
 
 export function LatestMatchCard() {
@@ -34,24 +33,27 @@ export function LatestMatchCard() {
         </span>
       </div>
 
-      {/* Score */}
-      <div className="flex items-center justify-between gap-4 mb-4">
+      {/* Teams + score */}
+      <div className="flex items-center justify-between mb-4">
         <div className="flex flex-col items-start gap-1">
-          <TeamBadge code={match.homeTeam.code} name={match.homeTeam.name} size="lg" />
+          <TeamBadge code={match.homeTeam.code} name={match.homeTeam.name} size="md" smSize="lg" bold nameClassName="max-w-[120px] sm:max-w-none truncate" />
           {homeParticipant && (
-            <span className="text-xs text-gray-500 ml-1">{homeParticipant.name}</span>
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
+              {homeParticipant.name}
+            </span>
           )}
         </div>
-        <div className="text-center">
-          <div className="font-display font-bold tabular-nums text-6xl tracking-tight text-navy-900 leading-none">
-            {match.score.home} <span className="text-gray-300">–</span> {match.score.away}
+        <div className="text-center shrink-0 px-2">
+          <div className="font-display font-bold tabular-nums text-4xl text-navy-900 leading-none">
+            {match.score.home ?? '–'} <span className="text-gray-300">–</span> {match.score.away ?? '–'}
           </div>
-          <div className="text-xs text-gray-500 mt-2">{formatKickoffFull(match.kickoff)}</div>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} size="lg" />
+          <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} size="md" smSize="lg" bold reverse nameClassName="max-w-[120px] sm:max-w-none truncate" />
           {awayParticipant && (
-            <span className="text-xs text-gray-500 mr-1">{awayParticipant.name}</span>
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
+              {awayParticipant.name}
+            </span>
           )}
         </div>
       </div>

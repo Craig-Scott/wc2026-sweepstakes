@@ -116,8 +116,19 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
 
   // ── In-play locked state ──────────────────────────────────────────────────
   if (locked) {
-    const isLive = match.status === 'IN_PLAY' || match.status === 'PAUSED'
+    // "live" = kicked off but not definitively finished (covers sync lag where status is still TIMED)
+    const isLive = !['FINISHED', 'POSTPONED', 'CANCELLED'].includes(match.status)
 
+    const liveMinute = (() => {
+      if (!isLive) return 0
+      if (match.status === 'PAUSED') return 45
+      const kickoffMs = match.kickoff.toDate().getTime()
+      if (match.currentMinute != null) {
+        const secsSinceSync = (Date.now() - match.updatedAt.toDate().getTime()) / 1000
+        return Math.min(90, match.currentMinute + Math.floor(secsSinceSync / 60))
+      }
+      return Math.min(90, Math.max(0, Math.floor((Date.now() - kickoffMs) / 60000)))
+    })()
     return (
       <div className="space-y-3">
         {/* Teams + score */}
@@ -132,10 +143,19 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
           </div>
           <div className="text-center shrink-0 px-2">
             <div className="font-display font-bold text-4xl text-navy-900 tabular-nums leading-none">
-              {match.score.home ?? (isLive ? 0 : '–')} <span className="text-gray-300">–</span> {match.score.away ?? (isLive ? 0 : '–')}
+              {match.score.home ?? '–'} <span className="text-gray-300">–</span> {match.score.away ?? '–'}
             </div>
             {isLive && (
-              <span className="text-xs font-semibold text-red-500 tracking-wide">LIVE</span>
+              <div className="flex flex-col items-center gap-1 mt-0.5">
+                <div className="text-xs font-semibold text-brand-600 tracking-wide">
+                  {match.status === 'PAUSED' ? 'HT' : match.status === 'IN_PLAY' ? `${liveMinute}'` : 'LIVE'}
+                </div>
+                <div className="relative h-1 w-12 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="absolute inset-0" style={{ animation: 'pill-lr 2s ease-in-out infinite' }}>
+                    <div className="absolute top-0 left-0 h-1 w-3 bg-brand-500 rounded-full" />
+                  </div>
+                </div>
+              </div>
             )}
           </div>
           <div className="flex flex-col items-end gap-1">

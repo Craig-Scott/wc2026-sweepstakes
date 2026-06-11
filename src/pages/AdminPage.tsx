@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
 import { useParticipants } from '@/hooks/useParticipants'
+import { useMatches } from '@/hooks/useMatches'
 import { useConfig } from '@/hooks/useConfig'
 import { AdminSkeleton } from '@/components/shared/Skeleton'
 import {
@@ -11,11 +12,12 @@ import {
   updateParticipantTeams,
   uploadParticipantPhoto,
   removeParticipantPhoto,
+  saveMatchDetails,
 } from '@/services/admin.service'
 import { PRIZE_LABELS, PODIUM_PRIZES, SPECIAL_PRIZES } from '@/config/prizes'
 import { WC2026_TEAMS } from '@/config/tournament'
 import { calculatePrizePool, formatCurrency } from '@/utils/prizes'
-import type { AppConfig, PrizePercentages } from '@/types'
+import type { AppConfig, PrizePercentages, Match } from '@/types'
 
 function PaymentToggle({ id, hasPaid }: { id: string; hasPaid: boolean }) {
   const [loading, setLoading] = useState(false)
@@ -302,11 +304,102 @@ function PrizeConfigEditor({ config }: { config: AppConfig }) {
   )
 }
 
+function MatchGoalEditor({ match }: { match: Match }) {
+  const [distances, setDistances] = useState<(number | null)[]>(
+    match.scorers.map(s => s.distanceMeters)
+  )
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const dirty = distances.some((d, i) => d !== match.scorers[i].distanceMeters)
+
+  return (
+    <div className="card p-4">
+      <div className="flex items-start justify-between gap-4 mb-3">
+        <div>
+          <p className="text-sm font-semibold text-navy-900">
+            {match.homeTeam.name} {match.score.home ?? '–'}–{match.score.away ?? '–'} {match.awayTeam.name}
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {match.round ?? match.stage}{match.group ? ` · Group ${match.group}` : ''}
+          </p>
+        </div>
+        {match.scorers.length > 0 && (
+          <button
+            disabled={saving || !dirty}
+            onClick={async () => {
+              setSaving(true)
+              const updated = match.scorers.map((s, i) => ({ ...s, distanceMeters: distances[i] }))
+              await saveMatchDetails(match.id, { scorers: updated })
+              setSaving(false)
+              setSaved(true)
+            }}
+            className="shrink-0 text-xs bg-brand-600 text-white px-3 py-1.5 rounded-lg hover:bg-brand-700 disabled:opacity-40 transition-colors"
+          >
+            {saving ? 'Saving…' : saved && !dirty ? '✓ Saved' : 'Save'}
+          </button>
+        )}
+      </div>
+
+      {match.scorers.length === 0 ? (
+        <p className="text-xs text-gray-400 italic">No scorers recorded yet</p>
+      ) : (
+        <div className="space-y-2">
+          {match.scorers.map((s, i) => (
+            <div key={i} className="flex items-center gap-3 text-sm">
+              <span className="text-gray-400 w-6 text-right shrink-0 text-xs">{s.minute}'</span>
+              <span className="flex-1 text-gray-700">
+                {s.isOwnGoal && <span className="text-red-400 mr-1 text-xs">(OG)</span>}
+                {s.isPenalty && <span className="text-gray-400 mr-1 text-xs">(pen)</span>}
+                {s.player}
+                <span className="text-gray-400 ml-1 text-xs">({s.team})</span>
+              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <input
+                  type="number"
+                  min={0}
+                  max={120}
+                  placeholder="—"
+                  value={distances[i] ?? ''}
+                  onChange={e => {
+                    const val = e.target.value === '' ? null : Number(e.target.value)
+                    setDistances(d => d.map((x, j) => j === i ? val : x))
+                    setSaved(false)
+                  }}
+                  className="border border-gray-200 rounded px-2 py-0.5 text-xs w-16 text-right focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+                <span className="text-xs text-gray-400">m</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MatchesTab() {
+  const { matches } = useMatches()
+  const finished = matches
+    .filter(m => m.status === 'FINISHED')
+    .sort((a, b) => b.kickoff.toDate().getTime() - a.kickoff.toDate().getTime())
+
+  if (finished.length === 0) {
+    return <p className="text-sm text-gray-500 text-center py-12">No finished matches yet.</p>
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {finished.map(m => <MatchGoalEditor key={m.id} match={m} />)}
+    </div>
+  )
+}
+
 export function AdminPage() {
   const { isAdmin, isLoading } = useCurrentUser()
   const { participants } = useParticipants()
   const { config } = useConfig()
-  const [tab, setTab] = useState<'participants' | 'prizes'>('participants')
+  const [tab, setTab] = useState<'participants' | 'prizes' | 'matches'>('participants')
 
   if (isLoading) return <AdminSkeleton />
   if (!isAdmin) return <Navigate to="/" replace />
@@ -317,7 +410,7 @@ export function AdminPage() {
         <h1 className="text-xl font-bold text-navy-900 mb-4">Admin Panel</h1>
 
         <div className="flex gap-2 mb-6">
-          {(['participants', 'prizes'] as const).map(t => (
+          {(['participants', 'prizes', 'matches'] as const).map(t => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -355,6 +448,7 @@ export function AdminPage() {
         )}
 
         {tab === 'prizes' && <PrizeConfigEditor config={config} />}
+        {tab === 'matches' && <MatchesTab />}
 
       </div>
     </AppShell>
