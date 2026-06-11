@@ -5,12 +5,16 @@ import {
 import { db } from './firebase'
 import type { Match, GroupStanding } from '@/types'
 
+function toMatch(data: Record<string, unknown>): Match {
+  return { scorers: [], cards: [], ...data } as unknown as Match
+}
+
 export function subscribeToMatches(
   onData: (matches: Match[]) => void,
 ): Unsubscribe {
   const q = query(collection(db, 'matches'), orderBy('kickoff', 'asc'))
   return onSnapshot(q, snap => {
-    onData(snap.docs.map(d => ({ id: d.id, ...d.data() }) as unknown as Match))
+    onData(snap.docs.map(d => toMatch({ id: d.id, ...d.data() })))
   })
 }
 
@@ -26,7 +30,7 @@ export function subscribeToUpcomingMatches(
   )
   return onSnapshot(q, snap => {
     const upcoming = snap.docs
-      .map(d => ({ ...d.data() } as unknown as Match))
+      .map(d => toMatch(d.data()))
       .filter(m => m.kickoff.toDate() > now)
       .slice(0, limit_)
     onData(upcoming)
@@ -43,14 +47,14 @@ export function subscribeToLatestFinishedMatch(
   )
   return onSnapshot(q, snap => {
     onData(snap.docs.length > 0
-      ? (snap.docs[0].data() as unknown as Match)
+      ? toMatch(snap.docs[0].data())
       : null)
   })
 }
 
 export async function getMatch(matchId: number): Promise<Match | null> {
   const snap = await getDoc(doc(db, 'matches', String(matchId)))
-  return snap.exists() ? (snap.data() as unknown as Match) : null
+  return snap.exists() ? toMatch(snap.data()!) : null
 }
 
 export function subscribeToStandings(
@@ -71,5 +75,5 @@ export async function getFinishedMatches(): Promise<Match[]> {
     orderBy('kickoff', 'desc'),
   )
   const snap = await getDocs(q)
-  return snap.docs.map(d => d.data() as unknown as Match)
+  return snap.docs.map(d => toMatch(d.data()))
 }
