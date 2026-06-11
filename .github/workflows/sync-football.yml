@@ -1,9 +1,14 @@
 name: Sync Football Data
 
 on:
-  # Every 30 minutes during World Cup (June 11 – July 19, 2026)
   schedule:
-    - cron: '*/30 * * * *'
+    # Every minute during UK match hours: 17:00–midnight BST (16:00–22:59 UTC)
+    # Combined with the double-run step below this gives ~30s effective frequency
+    - cron: '* 16-22 * 6-7 *'
+    # Every 30 min overnight: midnight–01:00 BST (23:00–23:59 UTC)
+    - cron: '0,30 23 * 6-7 *'
+    # Every 30 min overnight: 01:00–17:00 BST (00:00–15:59 UTC)
+    - cron: '0,30 0-15 * 6-7 *'
   # Trigger manually from GitHub Actions tab or admin panel
   workflow_dispatch:
 
@@ -25,6 +30,13 @@ jobs:
 
       - name: Sync match data from football-data.org → Firebase
         run: npx ts-node --esm scripts/sync-football.ts
+        env:
+          FOOTBALL_DATA_API_KEY:     ${{ secrets.FOOTBALL_DATA_API_KEY }}
+          FIREBASE_SERVICE_ACCOUNT:  ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          DRY_RUN: 'false'
+
+      - name: Wait 30 seconds then sync again
+        run: sleep 30 && npx ts-node --esm scripts/sync-football.ts
         env:
           FOOTBALL_DATA_API_KEY:     ${{ secrets.FOOTBALL_DATA_API_KEY }}
           FIREBASE_SERVICE_ACCOUNT:  ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

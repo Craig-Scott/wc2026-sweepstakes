@@ -81,8 +81,9 @@ async function syncMatches() {
       awayTeam: { code: normalizeCode(m.awayTeam?.tla ?? 'TBD'), name: m.awayTeam?.name ?? 'TBD' },
       status: mapStatus(m.status),
       score: {
-        home: m.score?.fullTime?.home ?? null,
-        away: m.score?.fullTime?.away ?? null,
+        // fullTime is null during live play; fall back to currentScore (in-play running score)
+        home: m.score?.fullTime?.home ?? m.score?.currentScore?.home ?? null,
+        away: m.score?.fullTime?.away ?? m.score?.currentScore?.away ?? null,
       },
       kickoff: m.utcDate ? Timestamp.fromDate(new Date(m.utcDate)) : null,
       stage: mapStage(m.stage ?? ''),

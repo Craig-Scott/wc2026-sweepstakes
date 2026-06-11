@@ -132,7 +132,7 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
           </div>
           <div className="text-center shrink-0 px-2">
             <div className="font-display font-bold text-4xl text-navy-900 tabular-nums leading-none">
-              {match.score.home ?? '–'} <span className="text-gray-300">–</span> {match.score.away ?? '–'}
+              {match.score.home ?? (isLive ? 0 : '–')} <span className="text-gray-300">–</span> {match.score.away ?? (isLive ? 0 : '–')}
             </div>
             {isLive && (
               <span className="text-xs font-semibold text-red-500 tracking-wide">LIVE</span>
