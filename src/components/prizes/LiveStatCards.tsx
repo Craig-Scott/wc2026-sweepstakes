@@ -1,14 +1,23 @@
 import { useMatches } from '@/hooks/useMatches'
 import { useParticipants } from '@/hooks/useParticipants'
-import { getDirtiestTeam } from '@/utils/cardPoints'
+import { getDirtiestTeam, calculateCardPoints } from '@/utils/cardPoints'
 import type { Match, Participant } from '@/types'
 
-function teamName(matches: Match[], code: string): string {
+// Resolve a code OR full name to the canonical team code stored in participants
+function resolveCode(matches: Match[], codeOrName: string): string {
   for (const m of matches) {
-    if (m.homeTeam.code === code) return m.homeTeam.name
-    if (m.awayTeam.code === code) return m.awayTeam.name
+    if (m.homeTeam.code === codeOrName || m.homeTeam.name === codeOrName) return m.homeTeam.code
+    if (m.awayTeam.code === codeOrName || m.awayTeam.name === codeOrName) return m.awayTeam.code
   }
-  return code
+  return codeOrName
+}
+
+function teamDisplayName(matches: Match[], codeOrName: string): string {
+  for (const m of matches) {
+    if (m.homeTeam.code === codeOrName || m.homeTeam.name === codeOrName) return m.homeTeam.name
+    if (m.awayTeam.code === codeOrName || m.awayTeam.name === codeOrName) return m.awayTeam.name
+  }
+  return codeOrName
 }
 
 function longestGoal(matches: Match[]) {
@@ -45,6 +54,10 @@ export function LiveStatCards() {
   const dirtiest = getDirtiestTeam(finishedMatches)
   const longest  = longestGoal(finishedMatches)
 
+  const dirtiestTable = [...calculateCardPoints(finishedMatches).entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+
   const empty = <p className="text-xs text-gray-500 italic">No data yet</p>
 
   return (
@@ -52,15 +65,30 @@ export function LiveStatCards() {
       <StatCard label="🟨 Dirtiest Team">
         {dirtiest ? (
           <>
-            <p className="text-sm font-semibold text-navy-900">
-              {teamName(matches, dirtiest.teamCode)}
-            </p>
-            <p className="text-xs text-gray-500 mt-0.5">{dirtiest.points} card points</p>
-            {ownerName(participants, dirtiest.teamCode) && (
-              <p className="text-xs text-gray-500 mt-1">
-                {ownerName(participants, dirtiest.teamCode)}
-              </p>
-            )}
+            <ul className="space-y-2">
+              {dirtiestTable.map(([codeOrName, pts], i) => {
+                const code = resolveCode(matches, codeOrName)
+                const owner = ownerName(participants, code)
+                return (
+                  <li key={codeOrName} className="flex items-center gap-2">
+                    <span className={`text-xs font-bold w-4 text-left shrink-0 ${
+                      i === 0 ? 'text-yellow-500' : i === 1 ? 'text-gray-400' : i === 2 ? 'text-amber-600' : 'text-gray-400'
+                    }`}>
+                      {i + 1}
+                    </span>
+                    <span className="text-sm flex-1 truncate">{teamDisplayName(matches, codeOrName)}</span>
+                    {owner && (
+                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700 shrink-0">
+                        {owner}
+                      </span>
+                    )}
+                    <span className="text-sm font-bold text-gray-700 tabular-nums shrink-0">
+                      {pts}<span className="text-xs text-gray-500 font-normal ml-0.5">pts</span>
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
           </>
         ) : empty}
       </StatCard>
@@ -70,12 +98,12 @@ export function LiveStatCards() {
           <>
             <p className="text-sm font-semibold text-navy-900">{longest.player}</p>
             <p className="text-xs text-gray-500 mt-0.5">
-              {longest.distanceMeters}m · {teamName(matches, longest.teamCode)}
+              {longest.distanceMeters}m · {teamDisplayName(matches, longest.teamCode)}
             </p>
-            {ownerName(participants, longest.teamCode) && (
-              <p className="text-xs text-gray-500 mt-1">
-                {ownerName(participants, longest.teamCode)}
-              </p>
+            {ownerName(participants, resolveCode(matches, longest.teamCode)) && (
+              <span className="inline-block mt-1.5 text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
+                {ownerName(participants, resolveCode(matches, longest.teamCode))}
+              </span>
             )}
           </>
         ) : empty}
