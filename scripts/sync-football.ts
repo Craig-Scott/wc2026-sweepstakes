@@ -102,20 +102,31 @@ type ESPNCard = { player: string; team: string; minute: number; type: 'YELLOW' |
 async function fetchESPNEventDetails(eventId: string): Promise<{ scorers: ESPNGoal[]; cards: ESPNCard[] }> {
   try {
     const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/summary?event=${eventId}`)
-    const data = await res.json() as { keyEvents?: Record<string, unknown>[] }
+    const data = await res.json() as { keyEvents?: Record<string, unknown>[]; boxscore?: Record<string, unknown> }
     const keyEvents = data.keyEvents ?? []
+
+    // Build displayName → abbreviation map from boxscore teams
+    const teamAbbr = new Map<string, string>()
+    const bsTeams = (data.boxscore?.teams as Record<string, unknown>[] | undefined) ?? []
+    for (const t of bsTeams) {
+      const info = t.team as Record<string, unknown>
+      if (info?.displayName && info?.abbreviation) {
+        teamAbbr.set(info.displayName as string, info.abbreviation as string)
+      }
+    }
+    const resolveTeam = (displayName: string) => teamAbbr.get(displayName) ?? displayName
 
     const scorers: ESPNGoal[] = keyEvents
       .filter(e => (e.scoringPlay === true))
       .map(e => {
         const type = (e.type as Record<string, unknown>)?.type as string
         const minute = Math.round(((e.clock as Record<string, unknown>)?.value as number ?? 0) / 60)
-        const teamName = (e.team as Record<string, unknown>)?.displayName as string ?? ''
+        const displayName = (e.team as Record<string, unknown>)?.displayName as string ?? ''
         const participants = (e.participants as Record<string, unknown>[]) ?? []
         const player = (participants[0]?.athlete as Record<string, unknown>)?.displayName as string ?? 'Unknown'
         return {
           player,
-          team: teamName,
+          team: resolveTeam(displayName),
           minute,
           distanceMeters: null,
           isOwnGoal: type === 'own-goal',
@@ -128,12 +139,12 @@ async function fetchESPNEventDetails(eventId: string): Promise<{ scorers: ESPNGo
       .map(e => {
         const type = (e.type as Record<string, unknown>)?.type as string
         const minute = Math.round(((e.clock as Record<string, unknown>)?.value as number ?? 0) / 60)
-        const teamName = (e.team as Record<string, unknown>)?.displayName as string ?? ''
+        const displayName = (e.team as Record<string, unknown>)?.displayName as string ?? ''
         const participants = (e.participants as Record<string, unknown>[]) ?? []
         const player = (participants[0]?.athlete as Record<string, unknown>)?.displayName as string ?? 'Unknown'
         return {
           player,
-          team: teamName,
+          team: resolveTeam(displayName),
           minute,
           type: type === 'red-card' ? 'RED' : type === 'yellow-red-card' ? 'YELLOW_RED' : 'YELLOW',
         }
@@ -156,11 +167,13 @@ async function syncMatches() {
   const matches = data.matches ?? []
   console.log(`  ${matches.length} matches returned`)
 
-  // Build a map of existing Firestore scorers so we can preserve admin-entered distanceMeters
+  // Build maps of existing Firestore scorers/cards so we can preserve admin-entered
+  // distanceMeters and avoid overwriting data when a match leaves ESPN's active scoreboard
   const existingScorers = new Map<string, Record<string, unknown>[]>()
+  const existingCards = new Map<string, Record<string, unknown>[]>()
   for (const snap of existingSnap.docs) {
-    const scorers = (snap.data().scorers as Record<string, unknown>[] | undefined) ?? []
-    existingScorers.set(snap.id, scorers)
+    existingScorers.set(snap.id, (snap.data().scorers as Record<string, unknown>[] | undefined) ?? [])
+    existingCards.set(snap.id, (snap.data().cards as Record<string, unknown>[] | undefined) ?? [])
   }
 
   const batch = db.batch()
@@ -219,8 +232,17 @@ async function syncMatches() {
         console.log(`  [ESPN] Goals for ${homeCode} vs ${awayCode}: ${scorers.map((s) => `${(s as {player:string;minute:number}).player} ${(s as {player:string;minute:number}).minute}'`).join(', ')}`)
       }
     } else {
-      scorers = []
-      cards = []
+      // For FINISHED matches, preserve existing Firestore data rather than overwriting with empty
+      // arrays — ESPN's scoreboard only shows recently active matches, so older finished matches
+      // would otherwise lose their scorer/card data on every subsequent sync run.
+      const matchId = String(m.id)
+      if (mapStatus(m.status) === 'FINISHED') {
+        scorers = existingScorers.get(matchId) ?? []
+        cards = existingCards.get(matchId) ?? []
+      } else {
+        scorers = []
+        cards = []
+      }
     }
 
     const matchDoc: Record<string, unknown> = {
@@ -254,6 +276,111 @@ async function syncMatches() {
 
   if (!DRY_RUN) await batch.commit()
   console.log(`  ${DRY_RUN ? '[DRY] Would have updated' : 'Updated'} ${count} matches`)
+}
+
+async function backfillScorers() {
+  console.log('Backfilling scorer data for finished matches with missing data…')
+
+  const snap = await db.collection('matches').where('status', '==', 'FINISHED').get()
+
+  // Only target matches where goals were scored but scorer array is empty
+  const needsBackfill = snap.docs.filter(d => {
+    const data = d.data()
+    const scorers = (data.scorers as unknown[] | undefined) ?? []
+    const score = data.score as { home: number | null; away: number | null }
+    const totalGoals = (score.home ?? 0) + (score.away ?? 0)
+    return scorers.length === 0 && totalGoals > 0
+  })
+
+  if (needsBackfill.length === 0) {
+    console.log('  No matches need backfilling')
+    return
+  }
+
+  console.log(`  ${needsBackfill.length} finished matches have goals but no scorer data`)
+
+  // Group by UTC date to batch ESPN scoreboard fetches
+  const dateMap = new Map<string, typeof needsBackfill>()
+  for (const doc of needsBackfill) {
+    const kickoff = (doc.data().kickoff as Timestamp).toDate()
+    const dateStr = `${kickoff.getUTCFullYear()}${String(kickoff.getUTCMonth() + 1).padStart(2, '0')}${String(kickoff.getUTCDate()).padStart(2, '0')}`
+    if (!dateMap.has(dateStr)) dateMap.set(dateStr, [])
+    dateMap.get(dateStr)!.push(doc)
+  }
+
+  const toDateStr = (d: Date) =>
+    `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`
+
+  const fetchESPNScoreboard = async (dateStr: string, into: Map<string, string>) => {
+    try {
+      const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=${dateStr}`)
+      const data = await res.json() as { events?: Record<string, unknown>[] }
+      let count = 0
+      for (const event of data.events ?? []) {
+        const comp = (event.competitions as Record<string, unknown>[])?.[0]
+        if (!comp) continue
+        const competitors = comp.competitors as Record<string, unknown>[]
+        const homeTeam = competitors?.find(t => t.homeAway === 'home')
+        const awayTeam = competitors?.find(t => t.homeAway === 'away')
+        if (!homeTeam || !awayTeam) continue
+        const homeAbb = (homeTeam.team as Record<string, unknown>)?.abbreviation as string
+        const awayAbb = (awayTeam.team as Record<string, unknown>)?.abbreviation as string
+        if (homeAbb && awayAbb) { into.set(`${homeAbb}|${awayAbb}`, event.id as string); count++ }
+      }
+      return count
+    } catch (e) {
+      console.warn(`  ESPN scoreboard fetch failed for ${dateStr}:`, (e as Error).message)
+      return 0
+    }
+  }
+
+  const batch = db.batch()
+  let updated = 0
+
+  for (const [dateStr, docs] of dateMap) {
+    // ESPN indexes by US Eastern Time — late-UTC matches (e.g. 02:00 UTC) appear on the
+    // previous calendar day in ESPN. Fetch both the UTC date and the day before.
+    const eventIdMap = new Map<string, string>()
+    const prevDate = new Date(`${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}T00:00:00Z`)
+    prevDate.setUTCDate(prevDate.getUTCDate() - 1)
+    const prevDateStr = toDateStr(prevDate)
+
+    const [n1, n2] = await Promise.all([
+      fetchESPNScoreboard(dateStr, eventIdMap),
+      fetchESPNScoreboard(prevDateStr, eventIdMap),
+    ])
+    console.log(`  Dates ${prevDateStr}+${dateStr}: found ${n1 + n2} ESPN events`)
+
+    for (const doc of docs) {
+      const matchData = doc.data()
+      const homeCode = (matchData.homeTeam as { code: string }).code
+      const awayCode = (matchData.awayTeam as { code: string }).code
+      const eventId = eventIdMap.get(`${homeCode}|${awayCode}`)
+
+      if (!eventId) {
+        console.log(`  No ESPN event found for ${homeCode} vs ${awayCode} on ${dateStr}`)
+        continue
+      }
+
+      const details = await fetchESPNEventDetails(eventId)
+      if (details.scorers.length === 0) {
+        console.log(`  ${homeCode} vs ${awayCode}: ESPN returned no goals (skipping)`)
+        continue
+      }
+
+      console.log(`  ${homeCode} vs ${awayCode}: backfilling ${details.scorers.length} goals, ${details.cards.length} cards`)
+
+      if (DRY_RUN) {
+        console.log(`  [DRY] ${details.scorers.map(s => `${s.player} ${s.minute}'`).join(', ')}`)
+      } else {
+        batch.update(doc.ref, { scorers: details.scorers, cards: details.cards })
+      }
+      updated++
+    }
+  }
+
+  if (!DRY_RUN && updated > 0) await batch.commit()
+  console.log(`  ${DRY_RUN ? '[DRY] Would have updated' : 'Updated'} ${updated} matches with backfilled scorer data`)
 }
 
 async function syncStandings() {
@@ -343,6 +470,7 @@ async function main() {
 
   for (const [name, fn] of [
     ['syncMatches', syncMatches],
+    ['backfillScorers', backfillScorers],
     ['syncStandings', syncStandings],
     ['calculatePredictionPoints', calculatePredictionPoints],
   ] as [string, () => Promise<void>][]) {
