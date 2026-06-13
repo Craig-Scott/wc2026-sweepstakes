@@ -25,9 +25,8 @@ function isCanonical(h: number, a: number): boolean {
 }
 
 function score(pH: number, pA: number, aH: number, aA: number): number {
-  if (!isCanonical(pH, pA) && pH === aH && pA === aA) return 9
-  if (Math.sign(pH - pA) === Math.sign(aH - aA)) return 3
-  return 0
+  if (!isCanonical(pH, pA)) return (pH === aH && pA === aA) ? 9 : 0
+  return Math.sign(pH - pA) === Math.sign(aH - aA) ? 3 : 0
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
@@ -40,10 +39,10 @@ const CASES: { label: string; pH: number; pA: number; aH: number; aA: number; wa
   { label: 'Exact 0-0',                pH: 0, pA: 0, aH: 0, aA: 0, want: 9 },
   { label: 'Exact 1-0',                pH: 1, pA: 0, aH: 1, aA: 0, want: 9 },
   { label: 'Exact 0-1',                pH: 0, pA: 1, aH: 0, aA: 1, want: 9 },
-  // Correct result only → 3
-  { label: 'Right home win, wrong score',  pH: 1, pA: 0, aH: 3, aA: 1, want: 3 },
-  { label: 'Right draw, wrong score',      pH: 1, pA: 1, aH: 2, aA: 2, want: 3 },
-  { label: 'Right away win, wrong score',  pH: 0, pA: 1, aH: 1, aA: 3, want: 3 },
+  // Specific score, wrong — no consolation points
+  { label: 'Right home win, wrong score',  pH: 1, pA: 0, aH: 3, aA: 1, want: 0 },
+  { label: 'Right draw, wrong score',      pH: 1, pA: 1, aH: 2, aA: 2, want: 0 },
+  { label: 'Right away win, wrong score',  pH: 0, pA: 1, aH: 1, aA: 3, want: 0 },
   // Canonical (result-only) sentinels → max 3 pts, never 9
   { label: 'Canonical home (99-0) vs 2-1',   pH: 99, pA: 0,  aH: 2, aA: 1, want: 3 },
   { label: 'Canonical draw (99-99) vs 1-1',  pH: 99, pA: 99, aH: 1, aA: 1, want: 3 },

@@ -49,6 +49,14 @@ export async function getAllPredictions(): Promise<Prediction[]> {
   return snap.docs.map(d => d.data() as Prediction)
 }
 
+export function subscribeToAllPredictions(
+  onData: (predictions: Prediction[]) => void,
+): Unsubscribe {
+  return onSnapshot(collection(db, 'predictions'), snap => {
+    onData(snap.docs.map(d => d.data() as Prediction))
+  })
+}
+
 export async function buildLeaderboard(participants: Participant[]): Promise<LeaderboardEntry[]> {
   const predictions = await getAllPredictions()
 

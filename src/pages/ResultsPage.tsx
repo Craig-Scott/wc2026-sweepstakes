@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { useMatches } from '@/hooks/useMatches'
+import { useParticipants } from '@/hooks/useParticipants'
+import { useAllPredictions } from '@/hooks/usePredictions'
 import { MatchResultCard } from '@/components/results/MatchResultCard'
 import { ResultsPageSkeleton } from '@/components/shared/Skeleton'
 import { STAGE_LABELS, STAGE_ORDER } from '@/config/tournament'
@@ -10,8 +12,17 @@ type StageFilter = 'ALL' | MatchStage
 
 export function ResultsPage() {
   const { matches, isLoading } = useMatches()
+  const { participants } = useParticipants()
+  const { predictions: allPredictions } = useAllPredictions()
   const [stageFilter, setStageFilter] = useState<StageFilter>('ALL')
   const [search, setSearch] = useState('')
+
+  const allPredsByMatch = new Map<number, typeof allPredictions>()
+  for (const p of allPredictions) {
+    const list = allPredsByMatch.get(p.matchId) ?? []
+    list.push(p)
+    allPredsByMatch.set(p.matchId, list)
+  }
 
   const finished = matches.filter(m => m.status === 'FINISHED')
 
@@ -71,7 +82,14 @@ export function ResultsPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {filtered.map(m => <MatchResultCard key={m.id} match={m} />)}
+            {[...filtered].reverse().map(m => (
+              <MatchResultCard
+                key={m.id}
+                match={m}
+                participants={participants}
+                matchPredictions={allPredsByMatch.get(m.id) ?? []}
+              />
+            ))}
           </div>
         )}
       </div>

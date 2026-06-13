@@ -7,14 +7,13 @@ export function calculatePoints(prediction: Prediction, match: Match): number {
   const { predictedHome, predictedAway } = prediction
   const { home, away } = match.score
 
-  // Canonical (result-only) picks can never earn the 6-pt exact-score bonus.
-  if (!isCanonicalPrediction(predictedHome, predictedAway) && predictedHome === home && predictedAway === away) return 9
+  // Specific score pick: 9 for exact match, 0 otherwise — no consolation points.
+  if (!isCanonicalPrediction(predictedHome, predictedAway)) {
+    return predictedHome === home && predictedAway === away ? 9 : 0
+  }
 
-  const actualResult = Math.sign(home - away)
-  const predictedResult = Math.sign(predictedHome - predictedAway)
-  if (actualResult === predictedResult) return 3
-
-  return 0
+  // Canonical (result-only) pick: 3 for correct result, 0 otherwise.
+  return Math.sign(predictedHome - predictedAway) === Math.sign(home - away) ? 3 : 0
 }
 
 export function isMatchLocked(match: Match): boolean {
