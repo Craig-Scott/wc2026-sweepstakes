@@ -58,6 +58,7 @@ export interface Match {
   group: string | null
   round: string | null
   currentMinute?: number | null
+  espnEventId?: string | null
   scorers: GoalScorer[]
   cards: Card[]
   updatedAt: Timestamp

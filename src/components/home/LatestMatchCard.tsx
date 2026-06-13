@@ -49,9 +49,9 @@ export function LatestMatchCard() {
             <div className="flex flex-col items-start">
               <TeamBadge code={match.homeTeam.code} size="md" smSize="lg" showName={false} />
               {(homeYellow > 0 || homeRed > 0) && (
-                <div className="flex items-center gap-1 mt-0.5">
-                  {homeYellow > 0 && <span className="w-3.5 h-5 flex items-center justify-center text-xs font-bold text-white rounded-[5px] bg-yellow-400">{homeYellow}</span>}
-                  {homeRed > 0 && <span className="w-3.5 h-5 flex items-center justify-center text-xs font-bold text-white rounded-[5px] bg-red-500">{homeRed}</span>}
+                <div className="flex flex-col gap-0.5 mt-7">
+                  {homeYellow > 0 && <span className="w-3 h-4 flex items-center justify-center text-xs font-bold text-white rounded-[3px] bg-yellow-400">{homeYellow}</span>}
+                  {homeRed > 0 && <span className="w-3 h-4 flex items-center justify-center text-xs font-bold text-white rounded-[3px] bg-red-500">{homeRed}</span>}
                 </div>
               )}
             </div>
@@ -63,7 +63,7 @@ export function LatestMatchCard() {
                 </span>
               )}
               {homeScorers.length > 0 && (
-                <div className="mt-1 space-y-0.5 text-xs text-gray-500">
+                <div className="mt-5 space-y-0.5 text-xs text-gray-500">
                   {homeScorers.map((s, i) => (
                     <div key={i} className="flex items-center gap-1">
                       <span className="text-gray-400 shrink-0">{s.minute}'</span>
@@ -93,7 +93,7 @@ export function LatestMatchCard() {
                 </span>
               )}
               {awayScorers.length > 0 && (
-                <div className="mt-1 space-y-0.5 text-xs text-gray-500 text-right">
+                <div className="mt-5 space-y-0.5 text-xs text-gray-500 text-right">
                   {awayScorers.map((s, i) => (
                     <div key={i} className="flex items-center justify-end gap-1">
                       {s.distanceMeters && <span className="text-brand-600 font-medium">{s.distanceMeters}m</span>}
@@ -109,9 +109,9 @@ export function LatestMatchCard() {
             <div className="flex flex-col items-end">
               <TeamBadge code={match.awayTeam.code} size="md" smSize="lg" showName={false} />
               {(awayYellow > 0 || awayRed > 0) && (
-                <div className="flex items-center gap-1 mt-0.5">
-                  {awayYellow > 0 && <span className="w-3.5 h-5 flex items-center justify-center text-xs font-bold text-white rounded-[5px] bg-yellow-400">{awayYellow}</span>}
-                  {awayRed > 0 && <span className="w-3.5 h-5 flex items-center justify-center text-xs font-bold text-white rounded-[5px] bg-red-500">{awayRed}</span>}
+                <div className="flex flex-col gap-0.5 mt-7">
+                  {awayYellow > 0 && <span className="w-3 h-4 flex items-center justify-center text-xs font-bold text-white rounded-[3px] bg-yellow-400">{awayYellow}</span>}
+                  {awayRed > 0 && <span className="w-3 h-4 flex items-center justify-center text-xs font-bold text-white rounded-[3px] bg-red-500">{awayRed}</span>}
                 </div>
               )}
             </div>

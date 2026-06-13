@@ -256,6 +256,7 @@ async function syncMatches() {
       },
       kickoff: m.utcDate ? Timestamp.fromDate(new Date(m.utcDate)) : null,
       currentMinute: m.minute ?? null,
+      espnEventId: espnScore?.eventId ?? null,
       stage: mapStage(m.stage ?? ''),
       group: m.group?.replace('GROUP_', '') ?? null,
       round: m.matchday ? `Matchday ${m.matchday}` : null,
@@ -430,31 +431,38 @@ async function calculatePredictionPoints() {
   const matchSnap = await db.collection('matches').where('status', '==', 'FINISHED').get()
   const finishedMatches = new Map(matchSnap.docs.map(d => [d.id, d.data()]))
 
-  const predSnap = await db.collection('predictions').where('pointsAwarded', '==', null).get()
-  const toUpdate = predSnap.docs.filter(d => finishedMatches.has(String(d.data().matchId)))
+  const isCanonical = (h: number, a: number) => (h === 99 && a === 0) || (h === 99 && a === 99) || (h === 0 && a === 99)
+  const calcPoints = (pH: number, pA: number, aH: number, aA: number): number => {
+    // Specific score: 9 for exact, 0 otherwise — no consolation points.
+    if (!isCanonical(pH, pA)) return (pH === aH && pA === aA) ? 9 : 0
+    // Canonical (result-only): 3 for correct direction, 0 otherwise.
+    return Math.sign(pH - pA) === Math.sign(aH - aA) ? 3 : 0
+  }
 
-  console.log(`  ${toUpdate.length} predictions to score`)
+  // Fetch all predictions for finished matches so we can also correct any
+  // predictions that were scored under the old rules.
+  const predSnap = await db.collection('predictions').get()
+  const toUpdate = predSnap.docs.filter(d => {
+    const data = d.data()
+    const match = finishedMatches.get(String(data.matchId))
+    if (!match) return false
+    const s = match.score as { home: number | null; away: number | null }
+    if (s.home === null || s.away === null) return false
+    const expected = calcPoints(data.predictedHome, data.predictedAway, s.home, s.away)
+    return data.pointsAwarded !== expected
+  })
+
+  console.log(`  ${toUpdate.length} predictions to score/correct`)
 
   const batch = db.batch()
   for (const predDoc of toUpdate) {
     const pred = predDoc.data()
     const match = finishedMatches.get(String(pred.matchId))!
-    const score = match.score as { home: number | null; away: number | null }
-
-    if (score.home === null || score.away === null) continue
-
-    let points = 0
-    const isCanonical = (h: number, a: number) => (h === 99 && a === 0) || (h === 99 && a === 99) || (h === 0 && a === 99)
-    if (!isCanonical(pred.predictedHome, pred.predictedAway) && pred.predictedHome === score.home && pred.predictedAway === score.away) {
-      points = 9
-    } else {
-      const actualResult = Math.sign(score.home - score.away)
-      const predResult = Math.sign(pred.predictedHome - pred.predictedAway)
-      if (actualResult === predResult) points = 3
-    }
+    const s = match.score as { home: number; away: number }
+    const points = calcPoints(pred.predictedHome, pred.predictedAway, s.home, s.away)
 
     if (DRY_RUN) {
-      console.log(`  [DRY] ${pred.participantId} ${pred.matchId}: ${points}pts`)
+      console.log(`  [DRY] ${pred.participantId} ${pred.matchId}: ${pred.pointsAwarded ?? 'null'} → ${points}pts`)
     } else {
       batch.update(predDoc.ref, { pointsAwarded: points })
     }
