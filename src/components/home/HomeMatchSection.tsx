@@ -20,7 +20,7 @@ function MatchPreview({ match, participants }: { match: Match; participants: Par
   const ukChannel = getUKBroadcast(match.homeTeam.code, match.awayTeam.code)
   return (
     <div className="relative flex items-center justify-between">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col items-start gap-1">
         <TeamBadge code={match.homeTeam.code} name={match.homeTeam.name} size="md" smSize="lg" bold nameClassName="max-w-[120px] sm:max-w-none truncate" />
         {findOwner(match.homeTeam.code) && (
           <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
@@ -34,13 +34,13 @@ function MatchPreview({ match, participants }: { match: Match; participants: Par
           {formatKickoffTime(match.kickoff)}{ukChannel ? ` – ${ukChannel}` : ''}
         </span>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col items-end gap-1">
+        <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} size="md" smSize="lg" bold reverse nameClassName="max-w-[120px] sm:max-w-none truncate" />
         {findOwner(match.awayTeam.code) && (
           <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-brand-600/10 text-brand-700">
             {findOwner(match.awayTeam.code)}
           </span>
         )}
-        <TeamBadge code={match.awayTeam.code} name={match.awayTeam.name} size="md" smSize="lg" bold reverse nameClassName="max-w-[120px] sm:max-w-none truncate" />
       </div>
     </div>
   )
