@@ -173,25 +173,26 @@ async function fetchESPNEventDetails(eventId: string): Promise<{ scorers: ESPNGo
 
 async function syncMatches(): Promise<Set<string>> {
   console.log('Fetching matches…')
-  const [data, espnScores, existingSnap] = await Promise.all([
+  const [data, espnScores, cacheSnap] = await Promise.all([
     apiFetch(`/competitions/${COMPETITION}/matches`),
     fetchESPNScores(),
-    db.collection('matches').get(),
+    db.collection('sync').doc('match-cache').get(),
   ])
   const matches = data.matches ?? []
   console.log(`  ${matches.length} matches returned`)
 
-  // Build maps of existing Firestore data to preserve across syncs
-  const existingStatuses = new Map<string, string>()
-  const existingScorers = new Map<string, Record<string, unknown>[]>()
-  const existingCards = new Map<string, Record<string, unknown>[]>()
-  const existingEspnEventIds = new Map<string, string | null>()
-  for (const snap of existingSnap.docs) {
-    existingStatuses.set(snap.id, (snap.data().status as string | undefined) ?? '')
-    existingScorers.set(snap.id, (snap.data().scorers as Record<string, unknown>[] | undefined) ?? [])
-    existingCards.set(snap.id, (snap.data().cards as Record<string, unknown>[] | undefined) ?? [])
-    existingEspnEventIds.set(snap.id, (snap.data().espnEventId as string | null) ?? null)
-  }
+  // Load existing match state from a single cache document (1 read instead of one per match)
+  const cacheData = cacheSnap.data() ?? {}
+  const existingStatuses = (cacheData.statuses ?? {}) as Record<string, string>
+  const existingScorers = (cacheData.scorers ?? {}) as Record<string, Record<string, unknown>[]>
+  const existingCards = (cacheData.cards ?? {}) as Record<string, Record<string, unknown>[]>
+  const existingEspnEventIds = (cacheData.espnEventIds ?? {}) as Record<string, string | null>
+
+  // Track updated state to write back to cache at the end of this sync
+  const newStatuses: Record<string, string> = {}
+  const newEspnEventIds: Record<string, string | null> = {}
+  const newScorers: Record<string, unknown[]> = { ...(existingScorers as Record<string, unknown[]>) }
+  const newCards: Record<string, unknown[]> = { ...(existingCards as Record<string, unknown[]>) }
 
   const newlyFinished = new Set<string>()
   const batch = db.batch()
@@ -224,7 +225,7 @@ async function syncMatches(): Promise<Set<string>> {
     let scorers: unknown[]
     let cards: unknown[]
 
-    const preserved = existingScorers.get(matchId) ?? []
+    const preserved = existingScorers[matchId] ?? []
     const mergeDistance = (player: string, minute: number): number | null => {
       const ex = preserved.find(s => s.player === player && s.minute === minute)
       return (ex?.distanceMeters as number | null) ?? null
@@ -257,17 +258,18 @@ async function syncMatches(): Promise<Set<string>> {
         console.log(`  [ESPN] Goals for ${homeCode} vs ${awayCode}: ${scorers.map((s) => `${(s as {player:string;minute:number}).player} ${(s as {player:string;minute:number}).minute}'`).join(', ')}`)
       }
     } else {
-      // For FINISHED matches, preserve existing Firestore data rather than overwriting with empty
-      // arrays — ESPN's scoreboard only shows recently active matches, so older finished matches
-      // would otherwise lose their scorer/card data on every subsequent sync run.
+      // For FINISHED matches, preserve cached data rather than overwriting with empty arrays.
+      // Cache is updated at end of every sync and patched by backfillScorers when it runs.
       if (mappedStatus === 'FINISHED') {
-        scorers = existingScorers.get(matchId) ?? []
-        cards = existingCards.get(matchId) ?? []
+        scorers = existingScorers[matchId] ?? []
+        cards = existingCards[matchId] ?? []
       } else {
         scorers = []
         cards = []
       }
     }
+
+    const espnEventId = espnScore?.eventId ?? existingEspnEventIds[matchId] ?? null
 
     const matchDoc: Record<string, unknown> = {
       id: m.id,
@@ -280,7 +282,7 @@ async function syncMatches(): Promise<Set<string>> {
       },
       kickoff: m.utcDate ? Timestamp.fromDate(new Date(m.utcDate)) : null,
       currentMinute: m.minute ?? null,
-      espnEventId: espnScore?.eventId ?? existingEspnEventIds.get(matchId) ?? null,
+      espnEventId,
       stage: mapStage(m.stage ?? ''),
       group: m.group?.replace('GROUP_', '') ?? null,
       round: m.matchday ? `Matchday ${m.matchday}` : null,
@@ -289,10 +291,16 @@ async function syncMatches(): Promise<Set<string>> {
       updatedAt: Timestamp.now(),
     }
 
-    if (mappedStatus === 'FINISHED' && existingStatuses.get(matchId) !== 'FINISHED') {
+    if (mappedStatus === 'FINISHED' && existingStatuses[matchId] !== 'FINISHED') {
       newlyFinished.add(matchId)
       console.log(`  [FINISHED] ${homeCode} vs ${awayCode} (${matchId})`)
     }
+
+    // Accumulate updated state for the cache write at the end of this sync
+    newStatuses[matchId] = mappedStatus
+    newEspnEventIds[matchId] = espnEventId
+    newScorers[matchId] = scorers as unknown[]
+    newCards[matchId] = cards as unknown[]
 
     if (DRY_RUN) {
       const scorerNames = (scorers as { player: string; minute: number }[]).map(s => `${s.player} ${s.minute}'`).join(', ')
@@ -304,7 +312,17 @@ async function syncMatches(): Promise<Set<string>> {
     count++
   }
 
-  if (!DRY_RUN) await batch.commit()
+  if (!DRY_RUN) {
+    // Write updated cache alongside match docs — next sync reads 1 doc instead of one per match
+    batch.set(db.collection('sync').doc('match-cache'), {
+      statuses: newStatuses,
+      espnEventIds: newEspnEventIds,
+      scorers: newScorers,
+      cards: newCards,
+      updatedAt: Timestamp.now(),
+    })
+    await batch.commit()
+  }
   console.log(`  ${DRY_RUN ? '[DRY] Would have updated' : 'Updated'} ${count} matches, ${newlyFinished.size} newly finished`)
   return newlyFinished
 }
@@ -313,12 +331,13 @@ async function backfillScorers(newlyFinished: Set<string>) {
   if (newlyFinished.size === 0) return
   console.log('Backfilling scorer data for newly finished matches…')
 
-  const snap = await db.collection('matches').where('status', '==', 'FINISHED').get()
+  // Targeted read — only the newly-finished match docs, not the full collection
+  const matchRefs = [...newlyFinished].map(id => db.collection('matches').doc(id))
+  const matchDocs = await db.getAll(...matchRefs)
 
-  // Only target newly-finished matches where goals were scored but scorer array is empty
-  const needsBackfill = snap.docs.filter(d => {
-    if (!newlyFinished.has(d.id)) return false
-    const data = d.data()
+  const needsBackfill = matchDocs.filter(d => {
+    if (!d.exists) return false
+    const data = d.data()!
     const scorers = (data.scorers as unknown[] | undefined) ?? []
     const score = data.score as { home: number | null; away: number | null }
     const totalGoals = (score.home ?? 0) + (score.away ?? 0)
@@ -335,7 +354,7 @@ async function backfillScorers(newlyFinished: Set<string>) {
   // Group by UTC date to batch ESPN scoreboard fetches
   const dateMap = new Map<string, typeof needsBackfill>()
   for (const doc of needsBackfill) {
-    const kickoff = (doc.data().kickoff as Timestamp).toDate()
+    const kickoff = (doc.data()!.kickoff as Timestamp).toDate()
     const dateStr = `${kickoff.getUTCFullYear()}${String(kickoff.getUTCMonth() + 1).padStart(2, '0')}${String(kickoff.getUTCDate()).padStart(2, '0')}`
     if (!dateMap.has(dateStr)) dateMap.set(dateStr, [])
     dateMap.get(dateStr)!.push(doc)
@@ -368,6 +387,7 @@ async function backfillScorers(newlyFinished: Set<string>) {
   }
 
   const batch = db.batch()
+  const cacheUpdates: Record<string, unknown> = {}
   let updated = 0
 
   for (const [dateStr, docs] of dateMap) {
@@ -385,7 +405,7 @@ async function backfillScorers(newlyFinished: Set<string>) {
     console.log(`  Dates ${prevDateStr}+${dateStr}: found ${n1 + n2} ESPN events`)
 
     for (const doc of docs) {
-      const matchData = doc.data()
+      const matchData = doc.data()!
       const homeCode = (matchData.homeTeam as { code: string }).code
       const awayCode = (matchData.awayTeam as { code: string }).code
       const eventId = eventIdMap.get(`${homeCode}|${awayCode}`)
@@ -407,12 +427,20 @@ async function backfillScorers(newlyFinished: Set<string>) {
         console.log(`  [DRY] ${details.scorers.map(s => `${s.player} ${s.minute}'`).join(', ')}`)
       } else {
         batch.update(doc.ref, { scorers: details.scorers, cards: details.cards })
+        // Patch cache with dot-notation so next sync doesn't overwrite backfilled scorer data
+        cacheUpdates[`scorers.${doc.id}`] = details.scorers
+        cacheUpdates[`cards.${doc.id}`] = details.cards
       }
       updated++
     }
   }
 
-  if (!DRY_RUN && updated > 0) await batch.commit()
+  if (!DRY_RUN && updated > 0) {
+    if (Object.keys(cacheUpdates).length > 0) {
+      batch.update(db.collection('sync').doc('match-cache'), cacheUpdates)
+    }
+    await batch.commit()
+  }
   console.log(`  ${DRY_RUN ? '[DRY] Would have updated' : 'Updated'} ${updated} matches with backfilled scorer data`)
 }
 
@@ -464,8 +492,10 @@ async function calculatePredictionPoints(newlyFinished: Set<string>) {
 
   const matchIds = [...newlyFinished].map(id => parseInt(id, 10))
 
-  const matchSnap = await db.collection('matches').where('status', '==', 'FINISHED').get()
-  const finishedMatches = new Map(matchSnap.docs.map(d => [d.id, d.data()]))
+  // Targeted read — only the newly-finished match docs, not the full collection
+  const matchRefs = [...newlyFinished].map(id => db.collection('matches').doc(id))
+  const matchDocs = await db.getAll(...matchRefs)
+  const finishedMatches = new Map(matchDocs.filter(d => d.exists).map(d => [d.id, d.data()!]))
 
   const isCanonical = (h: number, a: number) => (h === 99 && a === 0) || (h === 99 && a === 99) || (h === 0 && a === 99)
   const calcPoints = (pH: number, pA: number, aH: number, aA: number): number => {
