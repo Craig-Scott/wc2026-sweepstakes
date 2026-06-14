@@ -49,6 +49,17 @@ function normalizeCode(tla: string): string {
   return overrides[tla] ?? tla
 }
 
+// Translate ESPN abbreviations to football-data.org TLA codes where they diverge.
+// Expand this table whenever a sync log reports an unmatched ESPN match.
+const ESPN_TO_FDO: Record<string, string> = {
+  NIRL: 'NIR',
+  CZE:  'CZE', // same, but listed for visibility
+  SVK:  'SVK',
+}
+function normalizeESPNCode(abbr: string): string {
+  return ESPN_TO_FDO[abbr] ?? abbr
+}
+
 function mapStage(stage: string): string {
   const map: Record<string, string> = {
     GROUP_STAGE:         'GROUP',
@@ -85,11 +96,14 @@ async function fetchESPNScores(): Promise<Map<string, ESPNMatchData>> {
       const homeScore = parseInt(homeTeam.score as string, 10)
       const awayScore = parseInt(awayTeam.score as string, 10)
       if (isNaN(homeScore) || isNaN(awayScore)) continue
-      const homeAbb = (homeTeam.team as Record<string, unknown>)?.abbreviation as string
-      const awayAbb = (awayTeam.team as Record<string, unknown>)?.abbreviation as string
+      const homeAbb = normalizeESPNCode((homeTeam.team as Record<string, unknown>)?.abbreviation as string)
+      const awayAbb = normalizeESPNCode((awayTeam.team as Record<string, unknown>)?.abbreviation as string)
       scores.set(`${homeAbb}|${awayAbb}`, { home: homeScore, away: awayScore, eventId: event.id as string })
     }
     console.log(`  ESPN scores fetched: ${scores.size} active matches`)
+    for (const key of scores.keys()) {
+      console.log(`  ESPN active: ${key}`)
+    }
   } catch (e) {
     console.warn('  ESPN score fetch failed (non-fatal):', (e as Error).message)
   }
@@ -157,7 +171,7 @@ async function fetchESPNEventDetails(eventId: string): Promise<{ scorers: ESPNGo
   }
 }
 
-async function syncMatches() {
+async function syncMatches(): Promise<Set<string>> {
   console.log('Fetching matches…')
   const [data, espnScores, existingSnap] = await Promise.all([
     apiFetch(`/competitions/${COMPETITION}/matches`),
@@ -167,15 +181,19 @@ async function syncMatches() {
   const matches = data.matches ?? []
   console.log(`  ${matches.length} matches returned`)
 
-  // Build maps of existing Firestore scorers/cards so we can preserve admin-entered
-  // distanceMeters and avoid overwriting data when a match leaves ESPN's active scoreboard
+  // Build maps of existing Firestore data to preserve across syncs
+  const existingStatuses = new Map<string, string>()
   const existingScorers = new Map<string, Record<string, unknown>[]>()
   const existingCards = new Map<string, Record<string, unknown>[]>()
+  const existingEspnEventIds = new Map<string, string | null>()
   for (const snap of existingSnap.docs) {
+    existingStatuses.set(snap.id, (snap.data().status as string | undefined) ?? '')
     existingScorers.set(snap.id, (snap.data().scorers as Record<string, unknown>[] | undefined) ?? [])
     existingCards.set(snap.id, (snap.data().cards as Record<string, unknown>[] | undefined) ?? [])
+    existingEspnEventIds.set(snap.id, (snap.data().espnEventId as string | null) ?? null)
   }
 
+  const newlyFinished = new Set<string>()
   const batch = db.batch()
   let count = 0
 
@@ -183,6 +201,13 @@ async function syncMatches() {
     const homeCode = normalizeCode(m.homeTeam?.tla ?? 'TBD')
     const awayCode = normalizeCode(m.awayTeam?.tla ?? 'TBD')
     const espnScore = espnScores.get(`${homeCode}|${awayCode}`)
+    const matchId = String(m.id)
+    const mappedStatus = mapStatus(m.status)
+
+    // Log when an ESPN active match doesn't map to any football-data.org match — expand ESPN_TO_FDO if seen
+    if (!espnScore && espnScores.size > 0 && ['IN_PLAY', 'PAUSED'].includes(mappedStatus)) {
+      console.warn(`  [ESPN] No match found for ${homeCode}|${awayCode} (status: ${m.status}) — check ESPN_TO_FDO table`)
+    }
 
     const apiHome = m.score?.fullTime?.home ?? null
     const apiAway = m.score?.fullTime?.away ?? null
@@ -199,7 +224,7 @@ async function syncMatches() {
     let scorers: unknown[]
     let cards: unknown[]
 
-    const preserved = existingScorers.get(String(m.id)) ?? []
+    const preserved = existingScorers.get(matchId) ?? []
     const mergeDistance = (player: string, minute: number): number | null => {
       const ex = preserved.find(s => s.player === player && s.minute === minute)
       return (ex?.distanceMeters as number | null) ?? null
@@ -224,7 +249,7 @@ async function syncMatches() {
         minute: (b.minute as number) ?? 0,
         type: b.card === 'YELLOW_CARD' ? 'YELLOW' : b.card === 'RED_CARD' ? 'RED' : 'YELLOW_RED',
       }))
-    } else if (espnScore?.eventId && mapStatus(m.status) === 'FINISHED') {
+    } else if (espnScore?.eventId && mappedStatus === 'FINISHED') {
       const espnDetails = await fetchESPNEventDetails(espnScore.eventId)
       scorers = espnDetails.scorers.map(s => ({ ...s, distanceMeters: mergeDistance(s.player, s.minute) }))
       cards = espnDetails.cards
@@ -235,8 +260,7 @@ async function syncMatches() {
       // For FINISHED matches, preserve existing Firestore data rather than overwriting with empty
       // arrays — ESPN's scoreboard only shows recently active matches, so older finished matches
       // would otherwise lose their scorer/card data on every subsequent sync run.
-      const matchId = String(m.id)
-      if (mapStatus(m.status) === 'FINISHED') {
+      if (mappedStatus === 'FINISHED') {
         scorers = existingScorers.get(matchId) ?? []
         cards = existingCards.get(matchId) ?? []
       } else {
@@ -249,14 +273,14 @@ async function syncMatches() {
       id: m.id,
       homeTeam: { code: homeCode, name: m.homeTeam?.name ?? 'TBD' },
       awayTeam: { code: awayCode, name: m.awayTeam?.name ?? 'TBD' },
-      status: mapStatus(m.status),
+      status: mappedStatus,
       score: {
         home: scoreHome,
         away: scoreAway,
       },
       kickoff: m.utcDate ? Timestamp.fromDate(new Date(m.utcDate)) : null,
       currentMinute: m.minute ?? null,
-      espnEventId: espnScore?.eventId ?? null,
+      espnEventId: espnScore?.eventId ?? existingEspnEventIds.get(matchId) ?? null,
       stage: mapStage(m.stage ?? ''),
       group: m.group?.replace('GROUP_', '') ?? null,
       round: m.matchday ? `Matchday ${m.matchday}` : null,
@@ -265,27 +289,35 @@ async function syncMatches() {
       updatedAt: Timestamp.now(),
     }
 
+    if (mappedStatus === 'FINISHED' && existingStatuses.get(matchId) !== 'FINISHED') {
+      newlyFinished.add(matchId)
+      console.log(`  [FINISHED] ${homeCode} vs ${awayCode} (${matchId})`)
+    }
+
     if (DRY_RUN) {
-      const scorerNames = scorers.map((s: { player: string; minute: number }) => `${s.player} ${s.minute}'`).join(', ')
+      const scorerNames = (scorers as { player: string; minute: number }[]).map(s => `${s.player} ${s.minute}'`).join(', ')
       console.log(`  [DRY] ${m.id}: ${m.homeTeam?.name ?? 'TBD'} vs ${m.awayTeam?.name ?? 'TBD'} (${m.status})${scorerNames ? ` | ${scorerNames}` : ''}`)
     } else {
-      const ref = db.collection('matches').doc(String(m.id))
+      const ref = db.collection('matches').doc(matchId)
       batch.set(ref, matchDoc, { merge: true })
     }
     count++
   }
 
   if (!DRY_RUN) await batch.commit()
-  console.log(`  ${DRY_RUN ? '[DRY] Would have updated' : 'Updated'} ${count} matches`)
+  console.log(`  ${DRY_RUN ? '[DRY] Would have updated' : 'Updated'} ${count} matches, ${newlyFinished.size} newly finished`)
+  return newlyFinished
 }
 
-async function backfillScorers() {
-  console.log('Backfilling scorer data for finished matches with missing data…')
+async function backfillScorers(newlyFinished: Set<string>) {
+  if (newlyFinished.size === 0) return
+  console.log('Backfilling scorer data for newly finished matches…')
 
   const snap = await db.collection('matches').where('status', '==', 'FINISHED').get()
 
-  // Only target matches where goals were scored but scorer array is empty
+  // Only target newly-finished matches where goals were scored but scorer array is empty
   const needsBackfill = snap.docs.filter(d => {
+    if (!newlyFinished.has(d.id)) return false
     const data = d.data()
     const scorers = (data.scorers as unknown[] | undefined) ?? []
     const score = data.score as { home: number | null; away: number | null }
@@ -426,8 +458,12 @@ async function syncStandings() {
   console.log(`  ${DRY_RUN ? '[DRY] Would have updated' : 'Updated'} ${count} groups`)
 }
 
-async function calculatePredictionPoints() {
-  console.log('Calculating prediction points…')
+async function calculatePredictionPoints(newlyFinished: Set<string>) {
+  if (newlyFinished.size === 0) return
+  console.log(`Calculating prediction points for ${newlyFinished.size} newly finished match(es)…`)
+
+  const matchIds = [...newlyFinished].map(id => parseInt(id, 10))
+
   const matchSnap = await db.collection('matches').where('status', '==', 'FINISHED').get()
   const finishedMatches = new Map(matchSnap.docs.map(d => [d.id, d.data()]))
 
@@ -439,10 +475,17 @@ async function calculatePredictionPoints() {
     return Math.sign(pH - pA) === Math.sign(aH - aA) ? 3 : 0
   }
 
-  // Fetch all predictions for finished matches so we can also correct any
-  // predictions that were scored under the old rules.
-  const predSnap = await db.collection('predictions').get()
-  const toUpdate = predSnap.docs.filter(d => {
+  // Only fetch predictions for the newly-finished matches — avoids reading the whole collection every sync.
+  // Firestore 'in' queries support up to 30 values; chunk if necessary.
+  const chunkSize = 30
+  const allPredDocs = []
+  for (let i = 0; i < matchIds.length; i += chunkSize) {
+    const chunk = matchIds.slice(i, i + chunkSize)
+    const snap = await db.collection('predictions').where('matchId', 'in', chunk).get()
+    allPredDocs.push(...snap.docs)
+  }
+
+  const toUpdate = allPredDocs.filter(d => {
     const data = d.data()
     const match = finishedMatches.get(String(data.matchId))
     if (!match) return false
@@ -475,12 +518,19 @@ async function calculatePredictionPoints() {
 async function main() {
   console.log(`\n=== Football Data Sync${DRY_RUN ? ' (DRY RUN)' : ''} ===\n`)
   let failed = false
+  let newlyFinished = new Set<string>()
+
+  try {
+    newlyFinished = await syncMatches()
+  } catch (e) {
+    console.error('\n✗ syncMatches failed:', e)
+    failed = true
+  }
 
   for (const [name, fn] of [
-    ['syncMatches', syncMatches],
-    ['backfillScorers', backfillScorers],
+    ['backfillScorers', () => backfillScorers(newlyFinished)],
     ['syncStandings', syncStandings],
-    ['calculatePredictionPoints', calculatePredictionPoints],
+    ['calculatePredictionPoints', () => calculatePredictionPoints(newlyFinished)],
   ] as [string, () => Promise<void>][]) {
     try {
       await fn()
