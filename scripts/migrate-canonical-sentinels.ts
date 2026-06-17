@@ -27,10 +27,10 @@ const db = getFirestore()
 
 const DRY_RUN = process.env.DRY_RUN !== 'false'
 
-// Predictions submitted before this timestamp used the old canonical values.
-// Commit 218b069 was pushed at 08:54 UTC on 2026-06-11; allow a few minutes
-// for GitHub Actions to deploy, so the cutoff is 09:10 UTC.
-const CUTOFF = Timestamp.fromDate(new Date('2026-06-12T00:00:00.000Z'))
+// Dan submitted all predictions in bulk on 2026-06-12 before the sentinel fix
+// was live in his browser. The cutoff covers his session window.
+const CUTOFF = Timestamp.fromDate(new Date('2026-06-12T09:10:00.000Z'))
+const PARTICIPANT_FILTER = 'dan'
 
 // Old sentinel → new sentinel
 const MIGRATIONS: Array<{ fromHome: number; fromAway: number; toHome: number; toAway: number; label: string }> = [
@@ -59,6 +59,7 @@ let totalMigrated = 0
 
 for (const migration of MIGRATIONS) {
   const toMigrate = allPreds.filter(p =>
+    p.participantId === PARTICIPANT_FILTER &&
     p.predictedHome === migration.fromHome &&
     p.predictedAway === migration.fromAway &&
     p.submittedAt < CUTOFF

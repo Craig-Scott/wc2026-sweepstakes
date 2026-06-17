@@ -6,9 +6,10 @@ on:
     paths:
       - 'scripts/sync-football.ts'
   schedule:
-    # Every minute during UK match hours: 17:00–midnight BST (16:00–22:59 UTC)
-    # Combined with the double-run step below this gives ~30s effective frequency
-    - cron: '* 16-22 * 6-7 *'
+    # Every 2 minutes during UK match hours: 17:00–midnight BST (16:00–22:59 UTC).
+    # Live scores on open pages come from ESPN client-side, so this only governs how quickly
+    # the authoritative result/scorers persist and points are scored — 2 min is ample.
+    - cron: '*/2 16-22 * 6-7 *'
     # Every 30 min overnight: midnight–01:00 BST (23:00–23:59 UTC)
     - cron: '0,30 23 * 6-7 *'
     # Every 30 min overnight: 01:00–17:00 BST (00:00–15:59 UTC)
@@ -34,13 +35,6 @@ jobs:
 
       - name: Sync match data from football-data.org → Firebase
         run: npx ts-node --esm scripts/sync-football.ts
-        env:
-          FOOTBALL_DATA_API_KEY:     ${{ secrets.FOOTBALL_DATA_API_KEY }}
-          FIREBASE_SERVICE_ACCOUNT:  ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          DRY_RUN: 'false'
-
-      - name: Wait 30 seconds then sync again
-        run: sleep 30 && npx ts-node --esm scripts/sync-football.ts
         env:
           FOOTBALL_DATA_API_KEY:     ${{ secrets.FOOTBALL_DATA_API_KEY }}
           FIREBASE_SERVICE_ACCOUNT:  ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

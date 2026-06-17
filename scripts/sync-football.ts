@@ -171,7 +171,7 @@ async function fetchESPNEventDetails(eventId: string): Promise<{ scorers: ESPNGo
   }
 }
 
-async function syncMatches(): Promise<Set<string>> {
+async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set<string> }> {
   console.log('Fetching matches…')
   const [data, espnScores, cacheSnap] = await Promise.all([
     apiFetch(`/competitions/${COMPETITION}/matches`),
@@ -187,14 +187,24 @@ async function syncMatches(): Promise<Set<string>> {
   const existingScorers = (cacheData.scorers ?? {}) as Record<string, Record<string, unknown>[]>
   const existingCards = (cacheData.cards ?? {}) as Record<string, Record<string, unknown>[]>
   const existingEspnEventIds = (cacheData.espnEventIds ?? {}) as Record<string, string | null>
+  // matchId → the score string ("h-a") its predictions were last successfully scored against.
+  // Advanced ONLY by calculatePredictionPoints after its batch commits, so a failed scoring
+  // run (e.g. quota exhaustion) is retried next sync rather than silently skipped forever.
+  const existingScored = (cacheData.scored ?? {}) as Record<string, string>
+  // matchId → fingerprint of the doc's client-visible fields last written. Lets us skip writing
+  // (and thus fanning out to every connected listener) a match doc whose content hasn't changed.
+  const existingFingerprints = (cacheData.fingerprints ?? {}) as Record<string, string>
 
   // Track updated state to write back to cache at the end of this sync
   const newStatuses: Record<string, string> = {}
   const newEspnEventIds: Record<string, string | null> = {}
   const newScorers: Record<string, unknown[]> = { ...(existingScorers as Record<string, unknown[]>) }
   const newCards: Record<string, unknown[]> = { ...(existingCards as Record<string, unknown[]>) }
+  const newFingerprints: Record<string, string> = {}
 
   const newlyFinished = new Set<string>()
+  // Finished matches whose predictions still need scoring (never scored, or final score changed).
+  const toScore = new Set<string>()
   const batch = db.batch()
   let count = 0
 
@@ -270,11 +280,16 @@ async function syncMatches(): Promise<Set<string>> {
     }
 
     const espnEventId = espnScore?.eventId ?? existingEspnEventIds[matchId] ?? null
+    const homeName = m.homeTeam?.name ?? 'TBD'
+    const awayName = m.awayTeam?.name ?? 'TBD'
+    const stage = mapStage(m.stage ?? '')
+    const group = m.group?.replace('GROUP_', '') ?? null
+    const round = m.matchday ? `Matchday ${m.matchday}` : null
 
     const matchDoc: Record<string, unknown> = {
       id: m.id,
-      homeTeam: { code: homeCode, name: m.homeTeam?.name ?? 'TBD' },
-      awayTeam: { code: awayCode, name: m.awayTeam?.name ?? 'TBD' },
+      homeTeam: { code: homeCode, name: homeName },
+      awayTeam: { code: awayCode, name: awayName },
       status: mappedStatus,
       score: {
         home: scoreHome,
@@ -283,17 +298,35 @@ async function syncMatches(): Promise<Set<string>> {
       kickoff: m.utcDate ? Timestamp.fromDate(new Date(m.utcDate)) : null,
       currentMinute: m.minute ?? null,
       espnEventId,
-      stage: mapStage(m.stage ?? ''),
-      group: m.group?.replace('GROUP_', '') ?? null,
-      round: m.matchday ? `Matchday ${m.matchday}` : null,
+      stage,
+      group,
+      round,
       scorers,
       cards,
-      updatedAt: Timestamp.now(),
     }
+
+    // Fingerprint of the client-visible fields. Excludes `currentMinute` (changes every minute
+    // during play and is shown live from ESPN client-side anyway) and `updatedAt`, so a match
+    // doc is only rewritten — and thus only fanned out to listeners — on a meaningful change.
+    const fingerprint = JSON.stringify({
+      homeCode, homeName, awayCode, awayName,
+      status: mappedStatus, scoreHome, scoreAway, espnEventId,
+      kickoff: m.utcDate ?? null, stage, group, round, scorers, cards,
+    })
+    newFingerprints[matchId] = fingerprint
+    const changed = existingFingerprints[matchId] !== fingerprint
 
     if (mappedStatus === 'FINISHED' && existingStatuses[matchId] !== 'FINISHED') {
       newlyFinished.add(matchId)
       console.log(`  [FINISHED] ${homeCode} vs ${awayCode} (${matchId})`)
+    }
+
+    // A finished match needs (re)scoring when we've never scored it, or its final score
+    // changed since we last scored it. Decoupled from the FINISHED status transition so a
+    // failed scoring run (quota, etc.) is retried instead of being permanently skipped.
+    if (mappedStatus === 'FINISHED' && scoreHome !== null && scoreAway !== null) {
+      const scoreStr = `${scoreHome}-${scoreAway}`
+      if (existingScored[matchId] !== scoreStr) toScore.add(matchId)
     }
 
     // Accumulate updated state for the cache write at the end of this sync
@@ -304,27 +337,33 @@ async function syncMatches(): Promise<Set<string>> {
 
     if (DRY_RUN) {
       const scorerNames = (scorers as { player: string; minute: number }[]).map(s => `${s.player} ${s.minute}'`).join(', ')
-      console.log(`  [DRY] ${m.id}: ${m.homeTeam?.name ?? 'TBD'} vs ${m.awayTeam?.name ?? 'TBD'} (${m.status})${scorerNames ? ` | ${scorerNames}` : ''}`)
-    } else {
+      console.log(`  [DRY]${changed ? ' [CHANGED]' : ''} ${m.id}: ${homeName} vs ${awayName} (${m.status})${scorerNames ? ` | ${scorerNames}` : ''}`)
+    } else if (changed) {
+      // Only write (and fan out to every listener) when something clients render actually changed.
       const ref = db.collection('matches').doc(matchId)
-      batch.set(ref, matchDoc, { merge: true })
+      batch.set(ref, { ...matchDoc, updatedAt: Timestamp.now() }, { merge: true })
+      count++
     }
-    count++
   }
 
-  if (!DRY_RUN) {
-    // Write updated cache alongside match docs — next sync reads 1 doc instead of one per match
+  if (!DRY_RUN && count > 0) {
+    // Write updated cache alongside the changed match docs — next sync reads 1 doc instead of
+    // one per match. Only written when something changed, so an idle run touches nothing.
+    // `scored` is preserved as-is here; only calculatePredictionPoints advances it (after a
+    // successful commit), so scoring failures don't get masked by a status update.
     batch.set(db.collection('sync').doc('match-cache'), {
       statuses: newStatuses,
       espnEventIds: newEspnEventIds,
       scorers: newScorers,
       cards: newCards,
+      scored: existingScored,
+      fingerprints: newFingerprints,
       updatedAt: Timestamp.now(),
     })
-    await batch.commit()
   }
-  console.log(`  ${DRY_RUN ? '[DRY] Would have updated' : 'Updated'} ${count} matches, ${newlyFinished.size} newly finished`)
-  return newlyFinished
+  if (!DRY_RUN && count > 0) await batch.commit()
+  console.log(`  ${DRY_RUN ? '[DRY] Would have written' : 'Wrote'} ${count} changed matches, ${newlyFinished.size} newly finished, ${toScore.size} to score`)
+  return { newlyFinished, toScore }
 }
 
 async function backfillScorers(newlyFinished: Set<string>) {
@@ -455,6 +494,13 @@ async function syncStandings() {
   }
   const standings = (data.standings as Record<string, unknown>[]) ?? []
 
+  // Per-group fingerprints, so unchanged group tables aren't rewritten (and thus aren't fanned
+  // out to every client subscribed to the standings collection) on every sync.
+  const cacheRef = db.collection('sync').doc('standings-cache')
+  const existingFingerprints = (DRY_RUN ? {} : ((await cacheRef.get()).data()?.fingerprints ?? {})) as Record<string, string>
+  const newFingerprints: Record<string, string> = {}
+
+  const batch = db.batch()
   let count = 0
   for (const group of standings) {
     const groupCode = (group.group as string | undefined)?.replace('GROUP_', '') ?? '?'
@@ -472,28 +518,37 @@ async function syncStandings() {
       points: row.points ?? 0,
     }))
 
+    const fingerprint = JSON.stringify(table)
+    newFingerprints[groupCode] = fingerprint
+    const changed = existingFingerprints[groupCode] !== fingerprint
+
     if (DRY_RUN) {
-      console.log(`  [DRY] Group ${groupCode}: ${table.length} teams`)
-    } else {
-      await db.collection('standings').doc(groupCode).set({
+      console.log(`  [DRY]${changed ? ' [CHANGED]' : ''} Group ${groupCode}: ${table.length} teams`)
+    } else if (changed) {
+      batch.set(db.collection('standings').doc(groupCode), {
         group: groupCode,
         table,
         updatedAt: Timestamp.now(),
       })
+      count++
     }
-    count++
   }
-  console.log(`  ${DRY_RUN ? '[DRY] Would have updated' : 'Updated'} ${count} groups`)
+
+  if (!DRY_RUN && count > 0) {
+    batch.set(cacheRef, { fingerprints: newFingerprints, updatedAt: Timestamp.now() })
+    await batch.commit()
+  }
+  console.log(`  ${DRY_RUN ? '[DRY] Would have written' : 'Wrote'} ${count} changed groups`)
 }
 
-async function calculatePredictionPoints(newlyFinished: Set<string>) {
-  if (newlyFinished.size === 0) return
-  console.log(`Calculating prediction points for ${newlyFinished.size} newly finished match(es)…`)
+async function calculatePredictionPoints(toScore: Set<string>) {
+  if (toScore.size === 0) return
+  console.log(`Calculating prediction points for ${toScore.size} match(es)…`)
 
-  const matchIds = [...newlyFinished].map(id => parseInt(id, 10))
+  const matchIds = [...toScore].map(id => parseInt(id, 10))
 
-  // Targeted read — only the newly-finished match docs, not the full collection
-  const matchRefs = [...newlyFinished].map(id => db.collection('matches').doc(id))
+  // Targeted read — only the matches needing scoring, not the full collection
+  const matchRefs = [...toScore].map(id => db.collection('matches').doc(id))
   const matchDocs = await db.getAll(...matchRefs)
   const finishedMatches = new Map(matchDocs.filter(d => d.exists).map(d => [d.id, d.data()!]))
 
@@ -505,7 +560,7 @@ async function calculatePredictionPoints(newlyFinished: Set<string>) {
     return Math.sign(pH - pA) === Math.sign(aH - aA) ? 3 : 0
   }
 
-  // Only fetch predictions for the newly-finished matches — avoids reading the whole collection every sync.
+  // Only fetch predictions for the matches being scored — avoids reading the whole collection.
   // Firestore 'in' queries support up to 30 values; chunk if necessary.
   const chunkSize = 30
   const allPredDocs = []
@@ -513,6 +568,14 @@ async function calculatePredictionPoints(newlyFinished: Set<string>) {
     const chunk = matchIds.slice(i, i + chunkSize)
     const snap = await db.collection('predictions').where('matchId', 'in', chunk).get()
     allPredDocs.push(...snap.docs)
+  }
+
+  // Only matches whose score is present can be scored — track which ones so we can mark them
+  // scored in the cache afterwards (a match with a still-null score is left for a later run).
+  const scoredScores = new Map<string, string>()
+  for (const [id, match] of finishedMatches) {
+    const s = match.score as { home: number | null; away: number | null }
+    if (s.home !== null && s.away !== null) scoredScores.set(id, `${s.home}-${s.away}`)
   }
 
   const toUpdate = allPredDocs.filter(d => {
@@ -541,7 +604,17 @@ async function calculatePredictionPoints(newlyFinished: Set<string>) {
     }
   }
 
-  if (!DRY_RUN && toUpdate.length > 0) await batch.commit()
+  // Mark each scorable match as scored against its current score — in the SAME batch as the
+  // point updates, so the cache only advances if the writes actually commit. A match whose
+  // final score later changes will mismatch and be re-scored automatically.
+  if (!DRY_RUN && scoredScores.size > 0) {
+    const cacheRef = db.collection('sync').doc('match-cache')
+    for (const [id, scoreStr] of scoredScores) {
+      batch.update(cacheRef, { [`scored.${id}`]: scoreStr })
+    }
+  }
+
+  if (!DRY_RUN && (toUpdate.length > 0 || scoredScores.size > 0)) await batch.commit()
   console.log(`  Done scoring predictions`)
 }
 
@@ -549,9 +622,12 @@ async function main() {
   console.log(`\n=== Football Data Sync${DRY_RUN ? ' (DRY RUN)' : ''} ===\n`)
   let failed = false
   let newlyFinished = new Set<string>()
+  let toScore = new Set<string>()
 
   try {
-    newlyFinished = await syncMatches()
+    const result = await syncMatches()
+    newlyFinished = result.newlyFinished
+    toScore = result.toScore
   } catch (e) {
     console.error('\n✗ syncMatches failed:', e)
     failed = true
@@ -560,7 +636,7 @@ async function main() {
   for (const [name, fn] of [
     ['backfillScorers', () => backfillScorers(newlyFinished)],
     ['syncStandings', syncStandings],
-    ['calculatePredictionPoints', () => calculatePredictionPoints(newlyFinished)],
+    ['calculatePredictionPoints', () => calculatePredictionPoints(toScore)],
   ] as [string, () => Promise<void>][]) {
     try {
       await fn()

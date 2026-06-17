@@ -17,6 +17,7 @@ const SA_PATH = '/Users/craigs/Downloads/wc2026sweep-4a731-firebase-adminsdk-fbs
 const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT ?? readFileSync(SA_PATH, 'utf8'))
 initializeApp({ credential: cert(sa) })
 const db = getFirestore()
+const FIX = process.env.FIX === 'true'
 
 // ── Scoring function (mirrors both src/utils/predictions.ts and sync-football.ts) ──
 
@@ -122,8 +123,30 @@ for (const doc of predSnap.docs) {
 if (discrepancies === 0 && unscored === 0) {
   console.log(`  ✓ All ${correct} scored predictions are correct`)
 } else {
-  if (discrepancies > 0) console.log(`\n  ${discrepancies} discrepancies found — run npm run sync to fix`)
+  if (discrepancies > 0) {
+    if (FIX) {
+      console.log(`\n  Fixing ${discrepancies} discrepancies…`)
+    } else {
+      console.log(`\n  ${discrepancies} discrepancies found — rerun with FIX=true to correct`)
+    }
+  }
   if (unscored > 0) console.log(`  ${unscored} predictions unscored (matches not yet finished or sync not yet run)`)
+}
+
+if (FIX && discrepancies > 0) {
+  const batch = db.batch()
+  for (const doc of predSnap.docs) {
+    const pred = doc.data() as { participantId: string; matchId: number; predictedHome: number; predictedAway: number; pointsAwarded: number | null }
+    const match = matchMap.get(pred.matchId)
+    if (!match) continue
+    const s = match.score as { home: number; away: number }
+    const expected = score(pred.predictedHome, pred.predictedAway, s.home, s.away)
+    if (pred.pointsAwarded !== expected) {
+      batch.update(doc.ref, { pointsAwarded: expected })
+    }
+  }
+  await batch.commit()
+  console.log(`  ✓ Fixed`)
 }
 
 // ── Leaderboard ───────────────────────────────────────────────────────────────
