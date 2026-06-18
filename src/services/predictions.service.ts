@@ -1,9 +1,46 @@
 import {
-  collection, doc, setDoc, getDocs, onSnapshot,
+  collection, doc, setDoc, onSnapshot,
   query, where, orderBy, type Unsubscribe, serverTimestamp,
 } from 'firebase/firestore'
 import { db } from './firebase'
 import type { Prediction, LeaderboardEntry, Participant } from '@/types'
+
+// Aggregated leaderboard doc maintained by the sync job (scripts/sync-football.ts).
+// Subscribing to this single doc costs 1 read per client, vs reading the whole predictions
+// collection on every page load.
+export interface LeaderboardDoc {
+  points: Record<string, number>
+  exact: Record<string, number>
+}
+
+export function subscribeToLeaderboard(
+  onData: (data: LeaderboardDoc) => void,
+): Unsubscribe {
+  return onSnapshot(doc(db, 'leaderboard', 'current'), snap => {
+    const data = snap.data() as Partial<LeaderboardDoc> | undefined
+    onData({ points: data?.points ?? {}, exact: data?.exact ?? {} })
+  })
+}
+
+// Builds the displayed leaderboard from the aggregated doc + participants, replicating the old
+// buildLeaderboard ordering (points desc, then exact-score count desc). Includes every
+// participant so those with no points still appear.
+export function leaderboardEntries(
+  participants: Participant[],
+  agg: LeaderboardDoc,
+): LeaderboardEntry[] {
+  return participants
+    .map(p => ({
+      participantId: p.id,
+      participantName: p.name,
+      teamCodes: p.teamCodes,
+      totalPoints: agg.points[p.id] ?? 0,
+      correctResults: 0,
+      exactScores: agg.exact[p.id] ?? 0,
+      predictionsSubmitted: 0,
+    }))
+    .sort((a, b) => b.totalPoints - a.totalPoints || b.exactScores - a.exactScores)
+}
 
 export function predictionDocId(participantId: string, matchId: number) {
   return `${participantId}_${matchId}`
@@ -44,55 +81,10 @@ export function subscribeToPredictionsForParticipant(
   })
 }
 
-export async function getAllPredictions(): Promise<Prediction[]> {
-  const snap = await getDocs(collection(db, 'predictions'))
-  return snap.docs.map(d => d.data() as Prediction)
-}
-
 export function subscribeToAllPredictions(
   onData: (predictions: Prediction[]) => void,
 ): Unsubscribe {
   return onSnapshot(collection(db, 'predictions'), snap => {
     onData(snap.docs.map(d => d.data() as Prediction))
   })
-}
-
-export async function buildLeaderboard(participants: Participant[]): Promise<LeaderboardEntry[]> {
-  const predictions = await getAllPredictions()
-
-  const byParticipant = new Map<string, {
-    totalPoints: number
-    correctResults: number
-    exactScores: number
-    count: number
-  }>()
-
-  for (const pred of predictions) {
-    if (pred.pointsAwarded === null) continue
-    const entry = byParticipant.get(pred.participantId) ?? {
-      totalPoints: 0, correctResults: 0, exactScores: 0, count: 0,
-    }
-    entry.totalPoints += pred.pointsAwarded
-    if (pred.pointsAwarded === 9) entry.exactScores++
-    if (pred.pointsAwarded >= 3) entry.correctResults++
-    entry.count++
-    byParticipant.set(pred.participantId, entry)
-  }
-
-  return participants
-    .map(p => {
-      const stats = byParticipant.get(p.id) ?? {
-        totalPoints: 0, correctResults: 0, exactScores: 0, count: 0,
-      }
-      return {
-        participantId: p.id,
-        participantName: p.name,
-        teamCodes: p.teamCodes,
-        totalPoints: stats.totalPoints,
-        correctResults: stats.correctResults,
-        exactScores: stats.exactScores,
-        predictionsSubmitted: stats.count,
-      }
-    })
-    .sort((a, b) => b.totalPoints - a.totalPoints || b.exactScores - a.exactScores)
 }

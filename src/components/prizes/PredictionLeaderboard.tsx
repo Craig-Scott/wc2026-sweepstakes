@@ -1,24 +1,23 @@
 import { useState, useEffect } from 'react'
-import { buildLeaderboard } from '@/services/predictions.service'
+import {
+  subscribeToLeaderboard, leaderboardEntries, type LeaderboardDoc,
+} from '@/services/predictions.service'
 import { useParticipants } from '@/hooks/useParticipants'
-import type { LeaderboardEntry } from '@/types'
 
 import { LeaderboardSkeleton } from '@/components/shared/Skeleton'
 
 export function PredictionLeaderboard() {
   const { participants, isLoading: participantsLoading } = useParticipants()
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [agg, setAgg] = useState<LeaderboardDoc | null>(null)
 
   useEffect(() => {
-    if (participantsLoading) return
-    buildLeaderboard(participants).then(data => {
-      setEntries(data)
-      setIsLoading(false)
-    })
-  }, [participants, participantsLoading])
+    const unsub = subscribeToLeaderboard(setAgg)
+    return unsub
+  }, [])
 
-  if (isLoading) return <LeaderboardSkeleton />
+  if (participantsLoading || agg === null) return <LeaderboardSkeleton />
+
+  const entries = leaderboardEntries(participants, agg)
 
   return (
     <div className="card p-4">

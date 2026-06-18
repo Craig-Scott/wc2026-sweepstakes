@@ -42,6 +42,12 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Aggregated prediction leaderboard, maintained by the sync job (admin SDK bypasses rules)
+    match /leaderboard/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     match /prizeWinners/{doc} {
       allow read: if true;
       allow write: if isAdmin();

@@ -616,6 +616,27 @@ async function calculatePredictionPoints(toScore: Set<string>) {
 
   if (!DRY_RUN && (toUpdate.length > 0 || scoredScores.size > 0)) await batch.commit()
   console.log(`  Done scoring predictions`)
+
+  // Points changed → refresh the aggregated leaderboard doc that clients read (1 read each)
+  // instead of every client reading the whole predictions collection on every page load.
+  if (!DRY_RUN && toUpdate.length > 0) await updateLeaderboard()
+}
+
+// Recomputes the single `leaderboard/current` doc from all predictions. Reads the full
+// predictions collection, but only runs when points actually changed (a few times per match),
+// so total reads stay far below the per-client full-collection reads it replaces.
+async function updateLeaderboard() {
+  const snap = await db.collection('predictions').get()
+  const points: Record<string, number> = {}
+  const exact: Record<string, number> = {}
+  for (const d of snap.docs) {
+    const p = d.data()
+    if (p.pointsAwarded === null || p.pointsAwarded === undefined) continue
+    points[p.participantId] = (points[p.participantId] ?? 0) + p.pointsAwarded
+    if (p.pointsAwarded === 9) exact[p.participantId] = (exact[p.participantId] ?? 0) + 1
+  }
+  await db.collection('leaderboard').doc('current').set({ points, exact, updatedAt: Timestamp.now() })
+  console.log(`  Leaderboard refreshed (${Object.keys(points).length} participants)`)
 }
 
 async function main() {
