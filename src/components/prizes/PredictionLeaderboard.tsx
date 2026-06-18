@@ -1,21 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useSyncExternalStore } from 'react'
 import {
   subscribeToLeaderboard, leaderboardEntries, type LeaderboardDoc,
 } from '@/services/predictions.service'
+import { createSharedStore } from '@/services/subscriptionStore'
 import { useParticipants } from '@/hooks/useParticipants'
 
 import { LeaderboardSkeleton } from '@/components/shared/Skeleton'
 
+const leaderboardStore = createSharedStore<LeaderboardDoc>(
+  'leaderboard', subscribeToLeaderboard, { points: {}, exact: {} },
+)
+
 export function PredictionLeaderboard() {
   const { participants, isLoading: participantsLoading } = useParticipants()
-  const [agg, setAgg] = useState<LeaderboardDoc | null>(null)
+  const { data: agg, loaded } = useSyncExternalStore(leaderboardStore.subscribe, leaderboardStore.getSnapshot)
 
-  useEffect(() => {
-    const unsub = subscribeToLeaderboard(setAgg)
-    return unsub
-  }, [])
-
-  if (participantsLoading || agg === null) return <LeaderboardSkeleton />
+  if (participantsLoading || !loaded) return <LeaderboardSkeleton />
 
   const entries = leaderboardEntries(participants, agg)
 

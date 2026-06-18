@@ -9,7 +9,7 @@
  */
 
 import { initializeApp, cert } from 'firebase-admin/app'
-import { getFirestore, Timestamp } from 'firebase-admin/firestore'
+import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore'
 
 const DRY_RUN = process.env.DRY_RUN === 'true'
 const API_KEY = process.env.FOOTBALL_DATA_API_KEY!
@@ -20,6 +20,10 @@ if (!SERVICE_ACCOUNT) throw new Error('FIREBASE_SERVICE_ACCOUNT is required')
 
 initializeApp({ credential: cert(SERVICE_ACCOUNT) })
 const db = getFirestore()
+
+// Instrumentation: approximate Firestore document reads this run, logged in main().
+let READS = 0
+const countReads = (n: number) => { READS += n }
 
 const BASE_URL = 'https://api.football-data.org/v4'
 const COMPETITION = 'WC'
@@ -178,6 +182,7 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
     fetchESPNScores(),
     db.collection('sync').doc('match-cache').get(),
   ])
+  countReads(1)
   const matches = data.matches ?? []
   console.log(`  ${matches.length} matches returned`)
 
@@ -373,6 +378,7 @@ async function backfillScorers(newlyFinished: Set<string>) {
   // Targeted read — only the newly-finished match docs, not the full collection
   const matchRefs = [...newlyFinished].map(id => db.collection('matches').doc(id))
   const matchDocs = await db.getAll(...matchRefs)
+  countReads(matchDocs.length)
 
   const needsBackfill = matchDocs.filter(d => {
     if (!d.exists) return false
@@ -497,7 +503,7 @@ async function syncStandings() {
   // Per-group fingerprints, so unchanged group tables aren't rewritten (and thus aren't fanned
   // out to every client subscribed to the standings collection) on every sync.
   const cacheRef = db.collection('sync').doc('standings-cache')
-  const existingFingerprints = (DRY_RUN ? {} : ((await cacheRef.get()).data()?.fingerprints ?? {})) as Record<string, string>
+  const existingFingerprints = (DRY_RUN ? {} : ((countReads(1), (await cacheRef.get()).data()?.fingerprints) ?? {})) as Record<string, string>
   const newFingerprints: Record<string, string> = {}
 
   const batch = db.batch()
@@ -550,6 +556,7 @@ async function calculatePredictionPoints(toScore: Set<string>) {
   // Targeted read — only the matches needing scoring, not the full collection
   const matchRefs = [...toScore].map(id => db.collection('matches').doc(id))
   const matchDocs = await db.getAll(...matchRefs)
+  countReads(matchDocs.length)
   const finishedMatches = new Map(matchDocs.filter(d => d.exists).map(d => [d.id, d.data()!]))
 
   const isCanonical = (h: number, a: number) => (h === 99 && a === 0) || (h === 99 && a === 99) || (h === 0 && a === 99)
@@ -567,6 +574,7 @@ async function calculatePredictionPoints(toScore: Set<string>) {
   for (let i = 0; i < matchIds.length; i += chunkSize) {
     const chunk = matchIds.slice(i, i + chunkSize)
     const snap = await db.collection('predictions').where('matchId', 'in', chunk).get()
+    countReads(snap.size)
     allPredDocs.push(...snap.docs)
   }
 
@@ -590,17 +598,26 @@ async function calculatePredictionPoints(toScore: Set<string>) {
 
   console.log(`  ${toUpdate.length} predictions to score/correct`)
 
+  // Accumulate per-participant point/exact deltas so the leaderboard doc can be updated
+  // incrementally (FieldValue.increment) in the same batch — no full-collection re-read.
+  const ptsDelta: Record<string, number> = {}
+  const exactDelta: Record<string, number> = {}
+  const bump = (m: Record<string, number>, id: string, by: number) => { if (by) m[id] = (m[id] ?? 0) + by }
+
   const batch = db.batch()
   for (const predDoc of toUpdate) {
     const pred = predDoc.data()
     const match = finishedMatches.get(String(pred.matchId))!
     const s = match.score as { home: number; away: number }
     const points = calcPoints(pred.predictedHome, pred.predictedAway, s.home, s.away)
+    const old = (pred.pointsAwarded as number | null) ?? 0
 
     if (DRY_RUN) {
       console.log(`  [DRY] ${pred.participantId} ${pred.matchId}: ${pred.pointsAwarded ?? 'null'} → ${points}pts`)
     } else {
       batch.update(predDoc.ref, { pointsAwarded: points })
+      bump(ptsDelta, pred.participantId, points - old)
+      bump(exactDelta, pred.participantId, (points === 9 ? 1 : 0) - (old === 9 ? 1 : 0))
     }
   }
 
@@ -614,29 +631,18 @@ async function calculatePredictionPoints(toScore: Set<string>) {
     }
   }
 
-  if (!DRY_RUN && (toUpdate.length > 0 || scoredScores.size > 0)) await batch.commit()
-  console.log(`  Done scoring predictions`)
-
-  // Points changed → refresh the aggregated leaderboard doc that clients read (1 read each)
-  // instead of every client reading the whole predictions collection on every page load.
-  if (!DRY_RUN && toUpdate.length > 0) await updateLeaderboard()
-}
-
-// Recomputes the single `leaderboard/current` doc from all predictions. Reads the full
-// predictions collection, but only runs when points actually changed (a few times per match),
-// so total reads stay far below the per-client full-collection reads it replaces.
-async function updateLeaderboard() {
-  const snap = await db.collection('predictions').get()
-  const points: Record<string, number> = {}
-  const exact: Record<string, number> = {}
-  for (const d of snap.docs) {
-    const p = d.data()
-    if (p.pointsAwarded === null || p.pointsAwarded === undefined) continue
-    points[p.participantId] = (points[p.participantId] ?? 0) + p.pointsAwarded
-    if (p.pointsAwarded === 9) exact[p.participantId] = (exact[p.participantId] ?? 0) + 1
+  // Apply leaderboard deltas in the same batch. Atomic increments mean we never re-read the
+  // whole predictions collection. Re-seed with scripts/rebuild-leaderboard.ts if it ever drifts.
+  if (!DRY_RUN) {
+    const lbRef = db.collection('leaderboard').doc('current')
+    const lbUpdate: Record<string, FirebaseFirestore.FieldValue> = {}
+    for (const [id, d] of Object.entries(ptsDelta)) lbUpdate[`points.${id}`] = FieldValue.increment(d)
+    for (const [id, d] of Object.entries(exactDelta)) lbUpdate[`exact.${id}`] = FieldValue.increment(d)
+    if (Object.keys(lbUpdate).length > 0) batch.update(lbRef, lbUpdate)
   }
-  await db.collection('leaderboard').doc('current').set({ points, exact, updatedAt: Timestamp.now() })
-  console.log(`  Leaderboard refreshed (${Object.keys(points).length} participants)`)
+
+  if (!DRY_RUN && (toUpdate.length > 0 || scoredScores.size > 0)) await batch.commit()
+  console.log(`  Done scoring predictions${Object.keys(ptsDelta).length ? ` (leaderboard: ${Object.keys(ptsDelta).length} participant deltas)` : ''}`)
 }
 
 async function main() {
@@ -667,6 +673,7 @@ async function main() {
     }
   }
 
+  console.log(`\n≈ ${READS} Firestore document reads this run`)
   if (failed) {
     console.error('\nSync finished with errors')
     process.exit(1)
