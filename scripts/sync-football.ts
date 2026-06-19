@@ -175,7 +175,7 @@ async function fetchESPNEventDetails(eventId: string): Promise<{ scorers: ESPNGo
   }
 }
 
-async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set<string>; newlyLocked: Set<string> }> {
+async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set<string>; newlyLocked: Set<string>; espnIdGaps: { id: string; home: string; away: string; date: string }[] }> {
   console.log('Fetching matches…')
   const [data, espnScores, cacheSnap] = await Promise.all([
     apiFetch(`/competitions/${COMPETITION}/matches`),
@@ -212,6 +212,9 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
   // Locked matches (kicked off) not yet in the predictions aggregate — their picks become
   // visible at kickoff, so we populate the aggregate doc once they lock.
   const newlyLocked = new Set<string>()
+  // Matches with real teams and no espnEventId yet, kicking off soon — looked up by date so the
+  // client's live-score overlay is ready by kickoff (mainly catches knockout matches once drawn).
+  const espnIdGaps: { id: string; home: string; away: string; date: string }[] = []
 
   const newlyFinished = new Set<string>()
   // Finished matches whose predictions still need scoring (never scored, or final score changed).
@@ -345,6 +348,15 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
     const locked = m.utcDate ? new Date(m.utcDate).getTime() <= Date.now() : false
     if (locked && !existingAggregated[matchId]) newlyLocked.add(matchId)
 
+    // Needs an ESPN id for the live overlay? Only chase ones kicking off soon (or just started)
+    // with real teams — keeps the by-date lookups bounded to a date or two.
+    if (espnEventId === null && homeCode !== 'TBD' && awayCode !== 'TBD' && m.utcDate) {
+      const ko = new Date(m.utcDate).getTime()
+      if (ko >= Date.now() - 6 * 3600_000 && ko <= Date.now() + 48 * 3600_000) {
+        espnIdGaps.push({ id: matchId, home: homeCode, away: awayCode, date: m.utcDate })
+      }
+    }
+
     // Accumulate updated state for the cache write at the end of this sync
     newStatuses[matchId] = mappedStatus
     newEspnEventIds[matchId] = espnEventId
@@ -380,7 +392,7 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
   }
   if (!DRY_RUN && count > 0) await batch.commit()
   console.log(`  ${DRY_RUN ? '[DRY] Would have written' : 'Wrote'} ${count} changed matches, ${newlyFinished.size} newly finished, ${toScore.size} to score, ${newlyLocked.size} newly locked`)
-  return { newlyFinished, toScore, newlyLocked }
+  return { newlyFinished, toScore, newlyLocked, espnIdGaps }
 }
 
 async function backfillScorers(newlyFinished: Set<string>) {
@@ -719,18 +731,76 @@ async function populateAggregate(newlyLocked: Set<string>) {
   console.log(`  Aggregated ${docs.length} picks across ${newlyLocked.size} matches`)
 }
 
+// Fills espnEventId for soon-to-kick-off matches that don't have one yet (mainly knockout
+// matches once their teams are drawn), by looking up ESPN's scoreboard by date. Bounded to the
+// gap matches' dates. ESPN fetches are external (free); writes the id to the match doc + cache.
+async function backfillEspnIds(gaps: { id: string; home: string; away: string; date: string }[]) {
+  if (gaps.length === 0) return
+  console.log(`Backfilling ESPN ids for ${gaps.length} upcoming match(es)…`)
+
+  const toDateStr = (d: Date) =>
+    `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`
+
+  // Each match's UTC date + the day before (ESPN indexes by US Eastern).
+  const dates = new Set<string>()
+  for (const g of gaps) {
+    const k = new Date(g.date)
+    dates.add(toDateStr(k))
+    const prev = new Date(k); prev.setUTCDate(prev.getUTCDate() - 1)
+    dates.add(toDateStr(prev))
+  }
+
+  const eventIdMap = new Map<string, string>()
+  for (const dateStr of dates) {
+    try {
+      const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=${dateStr}`)
+      const data = await res.json() as { events?: Record<string, unknown>[] }
+      for (const event of data.events ?? []) {
+        const comp = (event.competitions as Record<string, unknown>[])?.[0]
+        const competitors = comp?.competitors as Record<string, unknown>[] | undefined
+        const home = competitors?.find(t => t.homeAway === 'home')
+        const away = competitors?.find(t => t.homeAway === 'away')
+        if (!home || !away) continue
+        const h = normalizeESPNCode((home.team as Record<string, unknown>)?.abbreviation as string)
+        const a = normalizeESPNCode((away.team as Record<string, unknown>)?.abbreviation as string)
+        if (h && a) eventIdMap.set(`${h}|${a}`, event.id as string)
+      }
+    } catch (e) {
+      console.warn(`  ESPN scoreboard fetch failed for ${dateStr}:`, (e as Error).message)
+    }
+  }
+
+  const found = gaps
+    .map(g => ({ ...g, eventId: eventIdMap.get(`${g.home}|${g.away}`) }))
+    .filter((g): g is typeof g & { eventId: string } => !!g.eventId)
+
+  if (found.length === 0) { console.log('  No matching ESPN events found yet'); return }
+  if (DRY_RUN) { console.log(`  [DRY] Would set ${found.length} espnEventId(s)`); return }
+
+  const batch = db.batch()
+  const cacheRef = db.collection('sync').doc('match-cache')
+  for (const f of found) {
+    batch.set(db.collection('matches').doc(f.id), { espnEventId: f.eventId, updatedAt: Timestamp.now() }, { merge: true })
+    batch.update(cacheRef, { [`espnEventIds.${f.id}`]: f.eventId })
+  }
+  await batch.commit()
+  console.log(`  Set espnEventId for ${found.length} match(es)`)
+}
+
 async function main() {
   console.log(`\n=== Football Data Sync${DRY_RUN ? ' (DRY RUN)' : ''} ===\n`)
   let failed = false
   let newlyFinished = new Set<string>()
   let toScore = new Set<string>()
   let newlyLocked = new Set<string>()
+  let espnIdGaps: { id: string; home: string; away: string; date: string }[] = []
 
   try {
     const result = await syncMatches()
     newlyFinished = result.newlyFinished
     toScore = result.toScore
     newlyLocked = result.newlyLocked
+    espnIdGaps = result.espnIdGaps
   } catch (e) {
     console.error('\n✗ syncMatches failed:', e)
     failed = true
@@ -741,6 +811,7 @@ async function main() {
     ['syncStandings', syncStandings],
     ['calculatePredictionPoints', () => calculatePredictionPoints(toScore)],
     ['populateAggregate', () => populateAggregate(newlyLocked)],
+    ['backfillEspnIds', () => backfillEspnIds(espnIdGaps)],
   ] as [string, () => Promise<void>][]) {
     try {
       await fn()
