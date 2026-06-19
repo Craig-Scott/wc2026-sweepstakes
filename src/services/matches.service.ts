@@ -3,6 +3,7 @@ import {
   query, orderBy, where, type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from './firebase'
+import { recordRead } from './readMeter'
 import type { Match, GroupStanding } from '@/types'
 
 function toMatch(data: Record<string, unknown>): Match {
@@ -14,6 +15,7 @@ export function subscribeToMatches(
 ): Unsubscribe {
   const q = query(collection(db, 'matches'), orderBy('kickoff', 'asc'))
   return onSnapshot(q, snap => {
+    recordRead('matches', snap.docChanges().length)
     onData(snap.docs.map(d => toMatch({ id: d.id, ...d.data() })))
   })
 }
@@ -61,6 +63,7 @@ export function subscribeToStandings(
   onData: (standings: GroupStanding[]) => void,
 ): Unsubscribe {
   return onSnapshot(collection(db, 'standings'), snap => {
+    recordRead('standings', snap.docChanges().length)
     const standings = snap.docs
       .map(d => d.data() as GroupStanding)
       .sort((a, b) => a.group.localeCompare(b.group))

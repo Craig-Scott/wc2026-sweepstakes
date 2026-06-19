@@ -674,6 +674,22 @@ async function main() {
   }
 
   console.log(`\n≈ ${READS} Firestore document reads this run`)
+
+  // Record this run's reads into the shared per-day usage doc (read via scripts/usage.ts).
+  if (!DRY_RUN && READS > 0) {
+    try {
+      const date = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(new Date())
+      await db.collection('usage').doc(date).set(
+        { reads: { sync: FieldValue.increment(READS) }, updatedAt: Timestamp.now() },
+        { merge: true },
+      )
+    } catch (e) {
+      console.warn('  (usage accounting write failed, non-fatal):', (e as Error).message)
+    }
+  }
+
   if (failed) {
     console.error('\nSync finished with errors')
     process.exit(1)

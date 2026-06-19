@@ -3,6 +3,7 @@ import {
   query, where, orderBy, type Unsubscribe, serverTimestamp,
 } from 'firebase/firestore'
 import { db } from './firebase'
+import { recordRead } from './readMeter'
 import type { Prediction, LeaderboardEntry, Participant } from '@/types'
 
 // Aggregated leaderboard doc maintained by the sync job (scripts/sync-football.ts).
@@ -17,6 +18,7 @@ export function subscribeToLeaderboard(
   onData: (data: LeaderboardDoc) => void,
 ): Unsubscribe {
   return onSnapshot(doc(db, 'leaderboard', 'current'), snap => {
+    recordRead('leaderboard', 1)
     const data = snap.data() as Partial<LeaderboardDoc> | undefined
     onData({ points: data?.points ?? {}, exact: data?.exact ?? {} })
   })
@@ -77,6 +79,7 @@ export function subscribeToPredictionsForParticipant(
     orderBy('submittedAt', 'desc'),
   )
   return onSnapshot(q, snap => {
+    recordRead('predictions-mine', snap.docChanges().length)
     onData(snap.docs.map(d => d.data() as Prediction))
   })
 }
@@ -85,6 +88,7 @@ export function subscribeToAllPredictions(
   onData: (predictions: Prediction[]) => void,
 ): Unsubscribe {
   return onSnapshot(collection(db, 'predictions'), snap => {
+    recordRead('predictions-all', snap.docChanges().length)
     onData(snap.docs.map(d => d.data() as Prediction))
   })
 }

@@ -10,7 +10,8 @@
     "seed": "npx ts-node --esm scripts/seed-data.ts",
     "seed:dev": "npx ts-node --esm scripts/seed-dev-data.ts",
     "sync": "npx ts-node --esm scripts/sync-football.ts",
-    "sync:dry": "DRY_RUN=true npx ts-node --esm scripts/sync-football.ts"
+    "sync:dry": "DRY_RUN=true npx ts-node --esm scripts/sync-football.ts",
+    "usage": "npx ts-node --esm scripts/usage.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",
