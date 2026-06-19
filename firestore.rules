@@ -48,6 +48,13 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Per-match prediction picks for locked matches, maintained by the sync job.
+    // (Predictions are already publicly readable, so this exposes nothing new.)
+    match /aggregates/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // Per-day read accounting. Clients append their own read tallies (increments only);
     // inspected via scripts/usage.ts. Diagnostics for a private pool — low-stakes data.
     match /usage/{date} {

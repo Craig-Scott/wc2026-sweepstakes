@@ -84,11 +84,25 @@ export function subscribeToPredictionsForParticipant(
   })
 }
 
-export function subscribeToAllPredictions(
+// Reads the sync-maintained aggregate of locked matches' picks — ONE doc instead of the whole
+// predictions collection. Reconstructs flat Prediction-shaped records (uid/submittedAt aren't
+// needed by the per-match display, which uses participantId/scores/pointsAwarded).
+type AggPick = { p: string; h: number; a: number; pts: number | null }
+export function subscribeToPredictionsAggregate(
   onData: (predictions: Prediction[]) => void,
 ): Unsubscribe {
-  return onSnapshot(collection(db, 'predictions'), snap => {
-    recordRead('predictions-all', snap.docChanges().length)
-    onData(snap.docs.map(d => d.data() as Prediction))
+  return onSnapshot(doc(db, 'aggregates', 'predictions'), snap => {
+    recordRead('predictions-agg', 1)
+    const byMatch = (snap.data()?.byMatch ?? {}) as Record<string, AggPick[]>
+    const flat: Prediction[] = []
+    for (const [matchId, picks] of Object.entries(byMatch)) {
+      for (const pk of picks) {
+        flat.push({
+          participantId: pk.p, matchId: Number(matchId),
+          predictedHome: pk.h, predictedAway: pk.a, pointsAwarded: pk.pts,
+        } as unknown as Prediction)
+      }
+    }
+    onData(flat)
   })
 }

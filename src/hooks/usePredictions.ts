@@ -1,5 +1,5 @@
 import { useState, useEffect, useSyncExternalStore } from 'react'
-import { subscribeToPredictionsForParticipant, subscribeToAllPredictions } from '@/services/predictions.service'
+import { subscribeToPredictionsForParticipant, subscribeToPredictionsAggregate } from '@/services/predictions.service'
 import { createSharedStore } from '@/services/subscriptionStore'
 import type { Prediction } from '@/types'
 
@@ -29,9 +29,9 @@ export function usePredictionForMatch(
   return predictions.find(p => p.matchId === matchId)
 }
 
-// One shared listener over the whole predictions collection for the entire app —
-// previously each of the home/results/predictions pages re-read all ~500 docs per load.
-const allPredictionsStore = createSharedStore<Prediction[]>('allPredictions', subscribeToAllPredictions, [])
+// One shared listener over the single sync-maintained aggregate doc — 1 read per session,
+// vs the ~500-doc predictions-collection listener this replaced.
+const allPredictionsStore = createSharedStore<Prediction[]>('allPredictions', subscribeToPredictionsAggregate, [])
 
 export function useAllPredictions() {
   const { data, loaded } = useSyncExternalStore(allPredictionsStore.subscribe, allPredictionsStore.getSnapshot)

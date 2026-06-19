@@ -175,7 +175,7 @@ async function fetchESPNEventDetails(eventId: string): Promise<{ scorers: ESPNGo
   }
 }
 
-async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set<string> }> {
+async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set<string>; newlyLocked: Set<string> }> {
   console.log('Fetching matches…')
   const [data, espnScores, cacheSnap] = await Promise.all([
     apiFetch(`/competitions/${COMPETITION}/matches`),
@@ -199,6 +199,9 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
   // matchId → fingerprint of the doc's client-visible fields last written. Lets us skip writing
   // (and thus fanning out to every connected listener) a match doc whose content hasn't changed.
   const existingFingerprints = (cacheData.fingerprints ?? {}) as Record<string, string>
+  // matchId → true once its picks have been written into aggregates/predictions (done once when
+  // a match locks). Advanced only by populateAggregate after it commits.
+  const existingAggregated = (cacheData.aggregated ?? {}) as Record<string, true>
 
   // Track updated state to write back to cache at the end of this sync
   const newStatuses: Record<string, string> = {}
@@ -206,6 +209,9 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
   const newScorers: Record<string, unknown[]> = { ...(existingScorers as Record<string, unknown[]>) }
   const newCards: Record<string, unknown[]> = { ...(existingCards as Record<string, unknown[]>) }
   const newFingerprints: Record<string, string> = {}
+  // Locked matches (kicked off) not yet in the predictions aggregate — their picks become
+  // visible at kickoff, so we populate the aggregate doc once they lock.
+  const newlyLocked = new Set<string>()
 
   const newlyFinished = new Set<string>()
   // Finished matches whose predictions still need scoring (never scored, or final score changed).
@@ -334,6 +340,11 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
       if (existingScored[matchId] !== scoreStr) toScore.add(matchId)
     }
 
+    // Once a match kicks off, everyone's picks become visible — populate the predictions
+    // aggregate doc for it (once). Lock is time-based (status may lag behind kickoff).
+    const locked = m.utcDate ? new Date(m.utcDate).getTime() <= Date.now() : false
+    if (locked && !existingAggregated[matchId]) newlyLocked.add(matchId)
+
     // Accumulate updated state for the cache write at the end of this sync
     newStatuses[matchId] = mappedStatus
     newEspnEventIds[matchId] = espnEventId
@@ -363,12 +374,13 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
       cards: newCards,
       scored: existingScored,
       fingerprints: newFingerprints,
+      aggregated: existingAggregated,
       updatedAt: Timestamp.now(),
     })
   }
   if (!DRY_RUN && count > 0) await batch.commit()
-  console.log(`  ${DRY_RUN ? '[DRY] Would have written' : 'Wrote'} ${count} changed matches, ${newlyFinished.size} newly finished, ${toScore.size} to score`)
-  return { newlyFinished, toScore }
+  console.log(`  ${DRY_RUN ? '[DRY] Would have written' : 'Wrote'} ${count} changed matches, ${newlyFinished.size} newly finished, ${toScore.size} to score, ${newlyLocked.size} newly locked`)
+  return { newlyFinished, toScore, newlyLocked }
 }
 
 async function backfillScorers(newlyFinished: Set<string>) {
@@ -643,6 +655,68 @@ async function calculatePredictionPoints(toScore: Set<string>) {
 
   if (!DRY_RUN && (toUpdate.length > 0 || scoredScores.size > 0)) await batch.commit()
   console.log(`  Done scoring predictions${Object.keys(ptsDelta).length ? ` (leaderboard: ${Object.keys(ptsDelta).length} participant deltas)` : ''}`)
+
+  // Refresh the predictions aggregate for the matches we just scored, with current points,
+  // using the predictions already read above (no extra reads). Separate commit + non-fatal so
+  // an aggregate hiccup can never corrupt scoring.
+  if (!DRY_RUN && allPredDocs.length > 0) {
+    try {
+      const byMatch: Record<string, unknown[]> = {}
+      for (const d of allPredDocs) {
+        const p = d.data()
+        const match = finishedMatches.get(String(p.matchId))
+        if (!match) continue
+        const s = match.score as { home: number | null; away: number | null }
+        if (s.home === null || s.away === null) continue
+        ;(byMatch[String(p.matchId)] ??= []).push({
+          p: p.participantId, h: p.predictedHome, a: p.predictedAway,
+          pts: calcPoints(p.predictedHome, p.predictedAway, s.home, s.away),
+        })
+      }
+      if (Object.keys(byMatch).length > 0) {
+        await db.collection('aggregates').doc('predictions').set({ byMatch, updatedAt: Timestamp.now() }, { merge: true })
+      }
+    } catch (e) {
+      console.warn('  (predictions aggregate refresh failed, non-fatal):', (e as Error).message)
+    }
+  }
+}
+
+// Writes the picks for newly-locked matches into aggregates/predictions, so the client can show
+// "who predicted what" by reading ONE doc instead of the whole predictions collection. Reads only
+// the locked matches' own predictions (scoped), and marks them aggregated in the cache so this
+// runs once per match.
+async function populateAggregate(newlyLocked: Set<string>) {
+  if (newlyLocked.size === 0) return
+  console.log(`Populating predictions aggregate for ${newlyLocked.size} newly-locked match(es)…`)
+
+  const ids = [...newlyLocked].map(id => parseInt(id, 10))
+  const docs: FirebaseFirestore.QueryDocumentSnapshot[] = []
+  for (let i = 0; i < ids.length; i += 30) {
+    const snap = await db.collection('predictions').where('matchId', 'in', ids.slice(i, i + 30)).get()
+    countReads(snap.size)
+    docs.push(...snap.docs)
+  }
+
+  const byMatch: Record<string, unknown[]> = {}
+  for (const id of newlyLocked) byMatch[id] = [] // ensure even pick-less matches get an entry
+  for (const d of docs) {
+    const p = d.data()
+    ;(byMatch[String(p.matchId)] ??= []).push({
+      p: p.participantId, h: p.predictedHome, a: p.predictedAway, pts: p.pointsAwarded ?? null,
+    })
+  }
+
+  if (DRY_RUN) {
+    console.log(`  [DRY] Would aggregate ${docs.length} picks across ${newlyLocked.size} matches`)
+    return
+  }
+  const batch = db.batch()
+  batch.set(db.collection('aggregates').doc('predictions'), { byMatch, updatedAt: Timestamp.now() }, { merge: true })
+  const cacheRef = db.collection('sync').doc('match-cache')
+  for (const id of newlyLocked) batch.update(cacheRef, { [`aggregated.${id}`]: true })
+  await batch.commit()
+  console.log(`  Aggregated ${docs.length} picks across ${newlyLocked.size} matches`)
 }
 
 async function main() {
@@ -650,11 +724,13 @@ async function main() {
   let failed = false
   let newlyFinished = new Set<string>()
   let toScore = new Set<string>()
+  let newlyLocked = new Set<string>()
 
   try {
     const result = await syncMatches()
     newlyFinished = result.newlyFinished
     toScore = result.toScore
+    newlyLocked = result.newlyLocked
   } catch (e) {
     console.error('\n✗ syncMatches failed:', e)
     failed = true
@@ -664,6 +740,7 @@ async function main() {
     ['backfillScorers', () => backfillScorers(newlyFinished)],
     ['syncStandings', syncStandings],
     ['calculatePredictionPoints', () => calculatePredictionPoints(toScore)],
+    ['populateAggregate', () => populateAggregate(newlyLocked)],
   ] as [string, () => Promise<void>][]) {
     try {
       await fn()
