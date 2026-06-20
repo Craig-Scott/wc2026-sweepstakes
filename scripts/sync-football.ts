@@ -80,7 +80,7 @@ function mapStage(stage: string): string {
   return map[stage] ?? stage
 }
 
-type ESPNMatchData = { home: number; away: number; eventId: string }
+type ESPNMatchData = { home: number; away: number; eventId: string; status: string }
 
 async function fetchESPNScores(): Promise<Map<string, ESPNMatchData>> {
   const scores = new Map<string, ESPNMatchData>()
@@ -102,7 +102,7 @@ async function fetchESPNScores(): Promise<Map<string, ESPNMatchData>> {
       if (isNaN(homeScore) || isNaN(awayScore)) continue
       const homeAbb = normalizeESPNCode((homeTeam.team as Record<string, unknown>)?.abbreviation as string)
       const awayAbb = normalizeESPNCode((awayTeam.team as Record<string, unknown>)?.abbreviation as string)
-      scores.set(`${homeAbb}|${awayAbb}`, { home: homeScore, away: awayScore, eventId: event.id as string })
+      scores.set(`${homeAbb}|${awayAbb}`, { home: homeScore, away: awayScore, eventId: event.id as string, status: statusName })
     }
     console.log(`  ESPN scores fetched: ${scores.size} active matches`)
     for (const key of scores.keys()) {
@@ -227,7 +227,7 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
     const awayCode = normalizeCode(m.awayTeam?.tla ?? 'TBD')
     const espnScore = espnScores.get(`${homeCode}|${awayCode}`)
     const matchId = String(m.id)
-    const mappedStatus = mapStatus(m.status)
+    let mappedStatus = mapStatus(m.status)
 
     // Log when an ESPN active match doesn't map to any football-data.org match — expand ESPN_TO_FDO if seen
     if (!espnScore && espnScores.size > 0 && ['IN_PLAY', 'PAUSED'].includes(mappedStatus)) {
@@ -238,6 +238,13 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
     const apiAway = m.score?.fullTime?.away ?? null
     const scoreHome = apiHome ?? espnScore?.home ?? null
     const scoreAway = apiAway ?? espnScore?.away ?? null
+
+    // football-data lags ESPN at full-time, leaving matches stuck "in play". If ESPN reports
+    // the match is over and we have a score, mark it FINISHED so it leaves the live UI promptly.
+    if (espnScore?.status === 'STATUS_FULL_TIME' && ['IN_PLAY', 'PAUSED', 'TIMED'].includes(mappedStatus) && scoreHome !== null && scoreAway !== null) {
+      console.log(`  [ESPN] Full-time override: ${homeCode} vs ${awayCode} ${mappedStatus} → FINISHED`)
+      mappedStatus = 'FINISHED'
+    }
 
     if (espnScore && apiHome === null) {
       console.log(`  [ESPN] ${homeCode} ${scoreHome}-${scoreAway} ${awayCode}`)
