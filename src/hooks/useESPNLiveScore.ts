@@ -35,8 +35,15 @@ export function useESPNLiveScore(espnEventId: string | null | undefined): ESPNLi
         if (!homeComp || !awayComp) return
 
         const statusType = ((header.status as Record<string, unknown>)?.type as Record<string, unknown>)?.name as string ?? ''
-        const clockValue = (header.status as Record<string, unknown>)?.clock as number ?? 0
-        const minute = clockValue > 0 ? Math.round(clockValue / 60) : null
+        // Live match minute: prefer the numeric clock (seconds), fall back to parsing the
+        // display clock string (e.g. "67'", "90'+2'"). Either is the real elapsed minute.
+        const status = (header.status as Record<string, unknown>) ?? {}
+        const clockValue = (status.clock as number) ?? 0
+        let minute: number | null = clockValue > 0 ? Math.round(clockValue / 60) : null
+        if (minute == null) {
+          const parsed = parseInt(String(status.displayClock ?? ''), 10)
+          if (!isNaN(parsed)) minute = parsed
+        }
 
         const keyEvents = (json.keyEvents as Record<string, unknown>[]) ?? []
 

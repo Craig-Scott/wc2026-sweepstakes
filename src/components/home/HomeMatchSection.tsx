@@ -75,15 +75,11 @@ export function LiveMatchCard({ match, prediction, participants, matchPrediction
   const awayRed = cards.filter(c => !isHome(c.team) && c.type !== 'YELLOW').length
   const hasScorers = scorers.length > 0
 
-  const liveMinute = (() => {
-    if (espn?.minute != null) return espn.minute
-    if (match.status === 'PAUSED') return 45
-    if (match.currentMinute != null) {
-      const secsSinceSync = (Date.now() - match.updatedAt.toDate().getTime()) / 1000
-      return Math.min(90, match.currentMinute + Math.floor(secsSinceSync / 60))
-    }
-    return Math.min(90, Math.max(0, Math.floor((Date.now() - match.kickoff.toDate().getTime()) / 60000)))
-  })()
+  // Use ESPN's live minute (accurate, refreshed every 30s). When it isn't available we show
+  // "LIVE" rather than a guessed wall-clock minute — the old estimate drifted to a wrong 90'
+  // because the sync no longer rewrites currentMinute/updatedAt on every live tick.
+  const liveMinute: number | null = espn?.minute ?? null
+  const ukChannel = getUKBroadcast(match.homeTeam.code, match.awayTeam.code)
 
   const sorted = [...participants].sort((a, b) => a.name.localeCompare(b.name))
   const others = sorted.filter(p => p.id !== prediction?.participantId)
@@ -109,9 +105,9 @@ export function LiveMatchCard({ match, prediction, participants, matchPrediction
 
   return (
     <div className="card p-4 space-y-3 ring-2 ring-brand-500/30">
-      {/* Stage */}
+      {/* Stage + UK broadcaster */}
       <div className="text-xs text-gray-400">
-        {STAGE_LABELS[match.stage] ?? match.stage}{match.group ? ` · Group ${match.group}` : ''}
+        {STAGE_LABELS[match.stage] ?? match.stage}{match.group ? ` · Group ${match.group}` : ''}{ukChannel ? ` · 📺 ${ukChannel}` : ''}
       </div>
 
       {/* Teams + score */}
@@ -156,7 +152,7 @@ export function LiveMatchCard({ match, prediction, participants, matchPrediction
           </div>
           <div className="flex flex-col items-center gap-1 mt-0.5">
             <div className="text-xs font-semibold text-brand-600 tracking-wide">
-              {match.status === 'PAUSED' ? 'HT' : match.status === 'IN_PLAY' ? `${liveMinute}'` : 'LIVE'}
+              {match.status === 'PAUSED' ? 'HT' : liveMinute != null ? `${liveMinute}'` : 'LIVE'}
             </div>
             <div className="relative h-1 w-12 bg-gray-100 rounded-full overflow-hidden">
               <div className="absolute inset-0" style={{ animation: 'pill-lr 2s ease-in-out infinite' }}>
