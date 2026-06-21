@@ -100,11 +100,15 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
 
   const handleScoreInputChange = (field: 'home' | 'away', raw: string) => {
     const digits = raw.replace(/\D/g, '').slice(0, 2)
-    const num = digits === '' ? 0 : Math.min(20, parseInt(digits))
-    const h = field === 'home' ? num : homeScore
-    const a = field === 'away' ? num : awayScore
-    if (field === 'home') setHomeScoreInput(digits)
-    else setAwayScoreInput(digits)
+    // Derive BOTH scores from the input boxes (empty = 0), not the stale numeric state — otherwise
+    // a result-pick sentinel (e.g. 99 for "home win") can leak into the untouched box, producing
+    // malformed values like 99-2.
+    const homeDigits = field === 'home' ? digits : homeScoreInput
+    const awayDigits = field === 'away' ? digits : awayScoreInput
+    const h = homeDigits === '' ? 0 : Math.min(20, parseInt(homeDigits))
+    const a = awayDigits === '' ? 0 : Math.min(20, parseInt(awayDigits))
+    setHomeScoreInput(homeDigits)
+    setAwayScoreInput(awayDigits)
     setHomeScore(h)
     setAwayScore(a)
     setResult(resultFromScores(h, a))
@@ -356,7 +360,9 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
             value={homeScoreInput} placeholder="0"
             onChange={e => handleScoreInputChange('home', e.target.value)}
             onBlur={handleScoreBlur}
-            className="w-12 text-center text-lg font-bold bg-white border border-gray-200 rounded-lg py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            className={`w-12 text-center text-lg font-bold bg-white border rounded-lg py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-500 ${
+              homeScoreInput === '' && awayScoreInput !== '' ? 'border-red-400' : 'border-gray-200'
+            }`}
           />
           <span className="text-gray-400 font-medium">–</span>
           <input
@@ -364,7 +370,9 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
             value={awayScoreInput} placeholder="0"
             onChange={e => handleScoreInputChange('away', e.target.value)}
             onBlur={handleScoreBlur}
-            className="w-12 text-center text-lg font-bold bg-white border border-gray-200 rounded-lg py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            className={`w-12 text-center text-lg font-bold bg-white border rounded-lg py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-500 ${
+              awayScoreInput === '' && homeScoreInput !== '' ? 'border-red-400' : 'border-gray-200'
+            }`}
           />
         </div>
       )}
