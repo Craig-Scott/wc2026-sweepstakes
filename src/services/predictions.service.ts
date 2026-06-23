@@ -84,6 +84,19 @@ export function subscribeToPredictionsForParticipant(
   })
 }
 
+// Reads one match's predictions directly (~18 docs). Used for LIVE matches so everyone's picks
+// appear the instant the predict window closes — no dependency on the sync having run.
+export function subscribeToPredictionsForMatch(
+  matchId: number,
+  onData: (predictions: Prediction[]) => void,
+): Unsubscribe {
+  const q = query(collection(db, 'predictions'), where('matchId', '==', matchId))
+  return onSnapshot(q, snap => {
+    recordRead('predictions-live', snap.docChanges().length)
+    onData(snap.docs.map(d => d.data() as Prediction))
+  })
+}
+
 // Reads the sync-maintained aggregate of locked matches' picks — ONE doc instead of the whole
 // predictions collection. Reconstructs flat Prediction-shaped records (uid/submittedAt aren't
 // needed by the per-match display, which uses participantId/scores/pointsAwarded).

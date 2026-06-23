@@ -1,5 +1,7 @@
 import { useState, useEffect, useSyncExternalStore } from 'react'
-import { subscribeToPredictionsForParticipant, subscribeToPredictionsAggregate } from '@/services/predictions.service'
+import {
+  subscribeToPredictionsForParticipant, subscribeToPredictionsAggregate, subscribeToPredictionsForMatch,
+} from '@/services/predictions.service'
 import { createSharedStore } from '@/services/subscriptionStore'
 import type { Prediction } from '@/types'
 
@@ -27,6 +29,20 @@ export function usePredictionForMatch(
   matchId: number,
 ): Prediction | undefined {
   return predictions.find(p => p.matchId === matchId)
+}
+
+// Live matches read their own predictions directly so everyone's picks appear the instant the
+// match begins — independent of the sync/aggregate. Pass null to disable (e.g. non-live matches).
+export function useMatchPredictions(matchId: number | null) {
+  const [predictions, setPredictions] = useState<Prediction[]>([])
+
+  useEffect(() => {
+    if (matchId == null) { setPredictions([]); return }
+    const unsub = subscribeToPredictionsForMatch(matchId, setPredictions)
+    return unsub
+  }, [matchId])
+
+  return predictions
 }
 
 // One shared listener over the single sync-maintained aggregate doc — 1 read per session,

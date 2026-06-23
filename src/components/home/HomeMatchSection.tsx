@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useMatches } from '@/hooks/useMatches'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
 import { useParticipants } from '@/hooks/useParticipants'
-import { usePredictionsForParticipant, useAllPredictions } from '@/hooks/usePredictions'
+import { usePredictionsForParticipant, useAllPredictions, useMatchPredictions } from '@/hooks/usePredictions'
 import { PredictionForm } from '@/components/predictions/PredictionForm'
 import { TeamBadge } from '@/components/shared/TeamBadge'
 import { HomeMatchSectionSkeleton } from '@/components/shared/Skeleton'
@@ -81,11 +81,16 @@ export function LiveMatchCard({ match, prediction, participants, matchPrediction
   const liveMinute: number | null = espn?.minute ?? null
   const ukChannel = getUKBroadcast(match.homeTeam.code, match.awayTeam.code)
 
+  // Read this live match's picks directly (instant, no sync dependency); fall back to the
+  // aggregate-provided prop only while the direct read is still loading.
+  const livePicks = useMatchPredictions(match.id)
+  const picks = livePicks.length > 0 ? livePicks : matchPredictions
+
   const sorted = [...participants].sort((a, b) => a.name.localeCompare(b.name))
   const others = sorted.filter(p => p.id !== prediction?.participantId)
 
   const renderPickCell = (p: Participant) => {
-    const pick = matchPredictions.find(pred => pred.participantId === p.id)
+    const pick = picks.find(pred => pred.participantId === p.id)
     if (!pick) return (
       <div key={p.id} className="rounded-lg border border-dashed border-gray-200 p-2 flex flex-col gap-1 opacity-50">
         <span className="text-xs font-semibold text-gray-500">{p.name}</span>
