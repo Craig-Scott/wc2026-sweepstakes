@@ -6,16 +6,20 @@ on:
     paths:
       - 'scripts/sync-football.ts'
   schedule:
-    # Every 2 minutes during UK match hours: 17:00–midnight BST (16:00–22:59 UTC).
-    # Live scores on open pages come from ESPN client-side, so this only governs how quickly
-    # the authoritative result/scorers persist and points are scored — 2 min is ample.
-    - cron: '*/2 16-22 * 6-7 *'
-    # Every 30 min overnight: midnight–01:00 BST (23:00–23:59 UTC)
-    - cron: '0,30 23 * 6-7 *'
-    # Every 30 min overnight: 01:00–17:00 BST (00:00–15:59 UTC)
-    - cron: '0,30 0-15 * 6-7 *'
-  # Trigger manually from GitHub Actions tab or admin panel
+    # GitHub heavily throttles/drops high-frequency schedules, so we DON'T rely on the cron for
+    # cadence. These are just START attempts — once a run starts, it loops internally (see below),
+    # syncing every 60s for ~55 min. Frequent attempts + the concurrency guard tile the window
+    # even when most triggers are dropped.
+    - cron: '*/15 16-22 * 6-7 *'   # match hours (16:00–22:59 UTC) — start a sync loop
+    - cron: '0,30 23 * 6-7 *'      # overnight: single sync every 30 min
+    - cron: '0,30 0-15 * 6-7 *'    # overnight: single sync every 30 min
   workflow_dispatch:
+
+# Only one sync run at a time; new triggers queue (don't cancel the running loop) so loops run
+# back-to-back for continuous coverage.
+concurrency:
+  group: sync-football
+  cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -23,6 +27,7 @@ env:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -33,8 +38,18 @@ jobs:
 
       - run: npm ci
 
-      - name: Sync match data from football-data.org → Firebase
-        run: npx ts-node --esm scripts/sync-football.ts
+      - name: Sync (loops every 60s during match hours, single run otherwise)
+        run: |
+          end=$((SECONDS + 3300))   # cap the loop at ~55 min, then let a queued run take over
+          while :; do
+            npx ts-node --esm scripts/sync-football.ts || true
+            hour=$((10#$(date -u +%H)))   # base-10 to avoid octal issues with 08/09
+            # Keep looping only during match hours and within the time cap; otherwise one sync and exit.
+            if [ "$hour" -lt 16 ] || [ "$hour" -gt 22 ] || [ "$SECONDS" -ge "$end" ]; then
+              break
+            fi
+            sleep 60
+          done
         env:
           FOOTBALL_DATA_API_KEY:     ${{ secrets.FOOTBALL_DATA_API_KEY }}
           FIREBASE_SERVICE_ACCOUNT:  ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
