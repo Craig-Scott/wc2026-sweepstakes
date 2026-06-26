@@ -13,7 +13,7 @@ const ARROW_STAGES: MatchStage[] = [
   'ROUND_OF_32', 'ROUND_OF_16', 'QUARTER_FINAL', 'SEMI_FINAL', 'FINAL',
 ]
 
-const MIN_SLOT_H = 56  // px per match slot (pill ~48px + breathing room)
+const MIN_SLOT_H = 100 // px per match slot (pill ~88px with owner line + breathing room)
 const LABEL_H    = 24  // px — stage label row
 const PILL_W     = 176 // px — w-44
 const CONN_W     = 28  // px — connector SVG width
@@ -39,19 +39,24 @@ function KnockoutMatchPill({ match, participants }: { match: Match; participants
   const awayWins    = hasScore && match.score.away! > match.score.home!
   const findOwner   = (code: string) => participants.find(p => p.teamCodes.includes(code))?.name
 
+  // Fixed-height row (flag + stacked team/owner) keeps every pill the same size, so pills don't
+  // overlap and the bracket connectors line up. Team name sits directly above the owner, both
+  // starting at the same left edge beside the flag.
   const Row = ({ code, name, score, winner }: {
     code: string; name: string; score: number | null; winner: boolean
   }) => (
-    <div className={`flex items-center justify-between px-2 py-1 ${winner ? 'bg-brand-50' : ''}`}>
-      <div className="flex flex-col min-w-0">
-        {placeholder
-          ? <span className="text-gray-400 italic text-xs">TBD</span>
-          : <TeamBadge code={code} name={name} size="sm" />
-        }
-        {!placeholder && findOwner(code) && (
-          <span className="text-gray-400 text-xs pl-6 truncate">{findOwner(code)}</span>
-        )}
-      </div>
+    <div className={`flex items-center justify-between gap-1 px-2 h-11 ${winner ? 'bg-brand-50' : ''}`}>
+      {placeholder ? (
+        <span className="text-gray-400 italic text-xs">TBD</span>
+      ) : (
+        <div className="flex items-center gap-2 min-w-0">
+          <TeamBadge code={code} size="md" showName={false} />
+          <div className="flex flex-col min-w-0 leading-tight">
+            <span className="text-xs text-gray-800 truncate">{name}</span>
+            <span className="text-gray-400 text-xs truncate">{findOwner(code) || ' '}</span>
+          </div>
+        </div>
+      )}
       <span className="font-bold tabular-nums ml-1 text-gray-500 text-xs shrink-0">
         {hasScore ? score : '-'}
       </span>
