@@ -263,11 +263,21 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
     if (m.homeTeam?.tla) teamNames.set(normalizeCode(m.homeTeam.tla), m.homeTeam.name ?? m.homeTeam.tla)
     if (m.awayTeam?.tla) teamNames.set(normalizeCode(m.awayTeam.tla), m.awayTeam.name ?? m.awayTeam.tla)
   }
-  // A game finished this run (football-data) → knockout slots may have resolved, so re-query ESPN.
-  // Also query the first time (no cached resolutions yet). Otherwise reuse the cached matchups.
-  const aGameFinished = matches.some(m => mapStatus(m.status) === 'FINISHED' && existingStatuses[String(m.id)] !== 'FINISHED')
+  // Re-query ESPN while any upcoming knockout tie still has an unresolved side. ESPN confirms ties
+  // on its own schedule (often a little after the deciding game, and not all at once), so gating
+  // purely on "a game just finished" races against ESPN's updates and misses late resolutions.
+  // This keeps checking each run (one cheap call) and self-terminates once the bracket is full.
+  const now = Date.now()
   const koTeams: Record<string, { home?: string; away?: string }> = { ...existingKoTeams }
-  if (aGameFinished || Object.keys(existingKoTeams).length === 0) {
+  const hasUnresolvedKo = matches.some(m => {
+    if (mapStage(m.stage ?? '') === 'GROUP') return false
+    const ko = existingKoTeams[String(m.id)] ?? {}
+    const bothKnown = (!!m.homeTeam?.tla || !!ko.home) && (!!m.awayTeam?.tla || !!ko.away)
+    if (bothKnown) return false
+    const ko_t = m.utcDate ? new Date(m.utcDate).getTime() : Infinity
+    return ko_t <= now + 14 * 86400_000 // only chase ties within the resolvable window
+  })
+  if (hasUnresolvedKo) {
     const espnKo = await fetchESPNKnockoutTeams()
     for (const m of matches) {
       if (mapStage(m.stage ?? '') === 'GROUP') continue
