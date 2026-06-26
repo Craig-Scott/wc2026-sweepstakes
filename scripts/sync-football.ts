@@ -114,6 +114,36 @@ async function fetchESPNScores(): Promise<Map<string, ESPNMatchData>> {
   return scores
 }
 
+// Fetches ESPN's view of upcoming fixtures (one ranged call) keyed by kickoff (UTC, to the
+// minute). ESPN resolves knockout teams as soon as they're confirmed — earlier than football-data,
+// and it uses slot labels (e.g. "3RD", "2I") rather than real codes until a tie is settled — so we
+// use it to fill knockout matchups the moment they're known, giving the prediction game more lead time.
+async function fetchESPNKnockoutTeams(): Promise<Map<string, { home: string; away: string }>> {
+  const map = new Map<string, { home: string; away: string }>()
+  try {
+    const now = new Date()
+    const end = new Date(now.getTime() + 21 * 86400_000)
+    const fmt = (d: Date) => `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`
+    const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=${fmt(now)}-${fmt(end)}`)
+    const data = await res.json() as { events?: Record<string, unknown>[] }
+    for (const event of data.events ?? []) {
+      const comp = (event.competitions as Record<string, unknown>[])?.[0]
+      if (!comp || !event.date) continue
+      const competitors = comp.competitors as Record<string, unknown>[]
+      const home = competitors?.find(t => t.homeAway === 'home')
+      const away = competitors?.find(t => t.homeAway === 'away')
+      const homeAbb = (home?.team as Record<string, unknown>)?.abbreviation as string
+      const awayAbb = (away?.team as Record<string, unknown>)?.abbreviation as string
+      if (!homeAbb || !awayAbb) continue
+      map.set(new Date(event.date as string).toISOString().slice(0, 16), { home: homeAbb, away: awayAbb })
+    }
+    console.log(`  ESPN fixtures window: ${map.size}`)
+  } catch (e) {
+    console.warn('  ESPN knockout fetch failed (non-fatal):', (e as Error).message)
+  }
+  return map
+}
+
 type ESPNGoal = { player: string; team: string; minute: number; isOwnGoal: boolean; isPenalty: boolean; distanceMeters: null }
 type ESPNCard = { player: string; team: string; minute: number; type: 'YELLOW' | 'RED' | 'YELLOW_RED' }
 
@@ -202,6 +232,9 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
   // matchId → true once its picks have been written into aggregates/predictions (done once when
   // a match locks). Advanced only by populateAggregate after it commits.
   const existingAggregated = (cacheData.aggregated ?? {}) as Record<string, true>
+  // matchId → knockout teams resolved from ESPN before football-data confirms them. Persisted so
+  // resolved matchups never revert to TBD on runs where we don't re-query ESPN.
+  const existingKoTeams = (cacheData.koTeams ?? {}) as Record<string, { home?: string; away?: string }>
 
   // Track updated state to write back to cache at the end of this sync
   const newStatuses: Record<string, string> = {}
@@ -222,9 +255,38 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
   const batch = db.batch()
   let count = 0
 
+  // ── Resolve knockout matchups (once per finished game) ──────────────────────
+  // Real team codes + names from whatever football-data already knows (all group teams), used to
+  // validate ESPN's knockout codes — we only ever fill a team we recognise, never a slot label.
+  const teamNames = new Map<string, string>()
   for (const m of matches) {
-    const homeCode = normalizeCode(m.homeTeam?.tla ?? 'TBD')
-    const awayCode = normalizeCode(m.awayTeam?.tla ?? 'TBD')
+    if (m.homeTeam?.tla) teamNames.set(normalizeCode(m.homeTeam.tla), m.homeTeam.name ?? m.homeTeam.tla)
+    if (m.awayTeam?.tla) teamNames.set(normalizeCode(m.awayTeam.tla), m.awayTeam.name ?? m.awayTeam.tla)
+  }
+  // A game finished this run (football-data) → knockout slots may have resolved, so re-query ESPN.
+  // Also query the first time (no cached resolutions yet). Otherwise reuse the cached matchups.
+  const aGameFinished = matches.some(m => mapStatus(m.status) === 'FINISHED' && existingStatuses[String(m.id)] !== 'FINISHED')
+  const koTeams: Record<string, { home?: string; away?: string }> = { ...existingKoTeams }
+  if (aGameFinished || Object.keys(existingKoTeams).length === 0) {
+    const espnKo = await fetchESPNKnockoutTeams()
+    for (const m of matches) {
+      if (mapStage(m.stage ?? '') === 'GROUP') continue
+      if (m.homeTeam?.tla && m.awayTeam?.tla) continue // football-data already has both — authoritative
+      const slot = m.utcDate ? espnKo.get(new Date(m.utcDate).toISOString().slice(0, 16)) : undefined
+      if (!slot) continue
+      const h = normalizeESPNCode(slot.home), a = normalizeESPNCode(slot.away)
+      const entry = koTeams[String(m.id)] ?? {}
+      if (teamNames.has(h)) entry.home = h   // only accept codes we recognise as real teams
+      if (teamNames.has(a)) entry.away = a
+      if (entry.home || entry.away) koTeams[String(m.id)] = entry
+    }
+  }
+
+  for (const m of matches) {
+    // Prefer football-data's teams; fall back to ESPN-resolved knockout teams; else TBD.
+    const ko = koTeams[String(m.id)]
+    const homeCode = m.homeTeam?.tla ? normalizeCode(m.homeTeam.tla) : (ko?.home ?? 'TBD')
+    const awayCode = m.awayTeam?.tla ? normalizeCode(m.awayTeam.tla) : (ko?.away ?? 'TBD')
     const espnScore = espnScores.get(`${homeCode}|${awayCode}`)
     const matchId = String(m.id)
     let mappedStatus = mapStatus(m.status)
@@ -301,8 +363,8 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
     }
 
     const espnEventId = espnScore?.eventId ?? existingEspnEventIds[matchId] ?? null
-    const homeName = m.homeTeam?.name ?? 'TBD'
-    const awayName = m.awayTeam?.name ?? 'TBD'
+    const homeName = m.homeTeam?.name ?? teamNames.get(homeCode) ?? (homeCode === 'TBD' ? 'TBD' : homeCode)
+    const awayName = m.awayTeam?.name ?? teamNames.get(awayCode) ?? (awayCode === 'TBD' ? 'TBD' : awayCode)
     const stage = mapStage(m.stage ?? '')
     const group = m.group?.replace('GROUP_', '') ?? null
     const round = m.matchday ? `Matchday ${m.matchday}` : null
@@ -394,6 +456,7 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
       scored: existingScored,
       fingerprints: newFingerprints,
       aggregated: existingAggregated,
+      koTeams,
       updatedAt: Timestamp.now(),
     })
   }
