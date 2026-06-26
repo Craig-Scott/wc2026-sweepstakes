@@ -37,7 +37,10 @@ export function PredictionsPage() {
     ['IN_PLAY', 'PAUSED'].includes(m.status) ||
     (['SCHEDULED', 'TIMED'].includes(m.status) && isMatchLocked(m))
   )
-  const upcoming = matches.filter(m => ['SCHEDULED', 'TIMED'].includes(m.status) && !isMatchLocked(m))
+  // Hide matches with an unresolved team (knockout ties whose opponent isn't decided yet) — only
+  // surface for prediction once both teams are known.
+  const upcoming = matches.filter(m => ['SCHEDULED', 'TIMED'].includes(m.status) && !isMatchLocked(m)
+    && m.homeTeam.code !== 'TBD' && m.awayTeam.code !== 'TBD')
   const predsByMatch = new Map(predictions.map(p => [p.matchId, p]))
 
   const groupedUpcoming = upcoming.reduce<Record<string, Match[]>>((acc, m) => {

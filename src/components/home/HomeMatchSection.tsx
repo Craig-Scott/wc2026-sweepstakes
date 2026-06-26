@@ -442,7 +442,9 @@ export function HomeMatchSection() {
   )
 
   const predictMatches = matches
-    .filter(m => ['SCHEDULED', 'TIMED'].includes(m.status) && !isMatchLocked(m))
+    // Only surface once both teams are known (hides knockout ties with an unresolved opponent).
+    .filter(m => ['SCHEDULED', 'TIMED'].includes(m.status) && !isMatchLocked(m)
+      && m.homeTeam.code !== 'TBD' && m.awayTeam.code !== 'TBD')
     .slice(0, 10)
 
   const finishedMatches = matches
