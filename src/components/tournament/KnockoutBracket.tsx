@@ -124,6 +124,25 @@ export function KnockoutBracket() {
     byStage[m.stage] = [...(byStage[m.stage] ?? []), m]
   }
 
+  // Reorder each round into true bracket order so that adjacent pairs feed the next round's match
+  // in sequence (the WC2026 bracket interleaves — R16 #1 is fed by R32 #1 & #3, R16 #2 by #2 & #5,
+  // etc.). Indices are into the kickoff-sorted list, which matches the official match numbering.
+  // Derived from ESPN's "Round of N Winner" fixture descriptors.
+  const BRACKET_ORDER: Partial<Record<MatchStage, number[]>> = {
+    ROUND_OF_32:   [0, 2, 1, 4, 10, 11, 8, 9, 3, 5, 6, 7, 13, 15, 12, 14],
+    ROUND_OF_16:   [0, 1, 4, 5, 2, 3, 6, 7],
+    QUARTER_FINAL: [0, 1, 2, 3],
+    SEMI_FINAL:    [0, 1],
+    FINAL:         [0],
+  }
+  for (const stage of Object.keys(byStage) as MatchStage[]) {
+    const sorted = byStage[stage].slice().sort(
+      (a, b) => a.kickoff.toDate().getTime() - b.kickoff.toDate().getTime())
+    const order = BRACKET_ORDER[stage]
+    // Only reorder a full round; otherwise leave kickoff-sorted (graceful fallback).
+    byStage[stage] = order && order.length === sorted.length ? order.map(i => sorted[i]) : sorted
+  }
+
   const arrowStages  = ARROW_STAGES.filter(s => (byStage[s]?.length ?? 0) > 0)
   const thirdPlace   = byStage['THIRD_PLACE_PLAYOFF'] ?? []
 
