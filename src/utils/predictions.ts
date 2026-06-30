@@ -7,9 +7,10 @@ export function calculatePoints(prediction: Prediction, match: Match): number {
   const { predictedHome, predictedAway } = prediction
   const { home, away } = match.score
 
-  // Specific score pick: 9 for exact match, 0 otherwise — no consolation points.
+  // Specific score pick: exact match earns 9 in the group stage, 15 in the knockouts; 0 otherwise.
   if (!isCanonicalPrediction(predictedHome, predictedAway)) {
-    return predictedHome === home && predictedAway === away ? 9 : 0
+    const exact = match.stage !== 'GROUP' ? 15 : 9
+    return predictedHome === home && predictedAway === away ? exact : 0
   }
 
   // Canonical (result-only) pick: 3 for correct result, 0 otherwise.

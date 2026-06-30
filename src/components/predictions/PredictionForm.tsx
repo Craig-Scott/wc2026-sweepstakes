@@ -257,7 +257,7 @@ export function PredictionForm({ match, participantId, uid, existingPrediction }
             </span>
             {existingPrediction.pointsAwarded !== null && (
               <span className={`font-bold shrink-0 ml-3 ${
-                existingPrediction.pointsAwarded === 9 ? 'text-brand-600'
+                existingPrediction.pointsAwarded >= 9 ? 'text-brand-600'
                 : existingPrediction.pointsAwarded === 3 ? 'text-blue-600'
                 : 'text-gray-400'
               }`}>

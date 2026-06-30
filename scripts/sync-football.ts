@@ -205,6 +205,44 @@ async function fetchESPNEventDetails(eventId: string): Promise<{ scorers: ESPNGo
   }
 }
 
+// Normal-time (90-min) score + outcome note for a finished knockout match, from ESPN's per-period
+// linescores (periods 0,1 = the two halves; later periods = extra time, then penalties). Knockout
+// predictions are graded and shown on the normal-time score, regardless of ET/pens; the note records
+// who actually advanced.
+async function fetchESPNKnockoutResult(eventId: string, homeCode: string, awayCode: string):
+  Promise<{ h: number; a: number; note: string | null } | null> {
+  try {
+    const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/summary?event=${eventId}`)
+    const data = await res.json() as { header?: Record<string, unknown> }
+    const comp = ((data.header as Record<string, unknown>)?.competitions as Record<string, unknown>[])?.[0]
+    const competitors = (comp?.competitors as Record<string, unknown>[]) ?? []
+    const parsed = competitors.map(c => ({
+      code: normalizeESPNCode((c.team as Record<string, unknown>)?.abbreviation as string),
+      name: (c.team as Record<string, unknown>)?.displayName as string,
+      periods: (((c as Record<string, unknown>).linescores as Record<string, unknown>[]) ?? []).map(x => Number(x.value ?? 0)),
+    }))
+    const home = parsed.find(p => p.code === homeCode)
+    const away = parsed.find(p => p.code === awayCode)
+    if (!home || !away || home.periods.length < 2 || away.periods.length < 2) return null
+    const hp = home.periods, ap = away.periods
+    const h = (hp[0] ?? 0) + (hp[1] ?? 0)
+    const a = (ap[0] ?? 0) + (ap[1] ?? 0)
+    let note: string | null = null
+    if (hp.length >= 5 || ap.length >= 5) {
+      const ph = hp[4] ?? 0, pa = ap[4] ?? 0
+      note = `${ph > pa ? home.name : away.name} won ${Math.max(ph, pa)}-${Math.min(ph, pa)} on penalties`
+    } else if (hp.length >= 4 || ap.length >= 4) {
+      const aetH = hp.slice(0, 4).reduce((s, x) => s + (x ?? 0), 0)
+      const aetA = ap.slice(0, 4).reduce((s, x) => s + (x ?? 0), 0)
+      if (aetH !== aetA) note = `${aetH > aetA ? home.name : away.name} won ${Math.max(aetH, aetA)}-${Math.min(aetH, aetA)} after extra time`
+    }
+    return { h, a, note }
+  } catch (e) {
+    console.warn(`  ESPN knockout result fetch failed for ${eventId} (non-fatal):`, (e as Error).message)
+    return null
+  }
+}
+
 async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set<string>; newlyLocked: Set<string>; espnIdGaps: { id: string; home: string; away: string; date: string }[] }> {
   console.log('Fetching matches…')
   const [data, espnScores, cacheSnap] = await Promise.all([
@@ -235,6 +273,10 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
   // matchId → knockout teams resolved from ESPN before football-data confirms them. Persisted so
   // resolved matchups never revert to TBD on runs where we don't re-query ESPN.
   const existingKoTeams = (cacheData.koTeams ?? {}) as Record<string, { home?: string; away?: string }>
+  // matchId → finished knockout match's normal-time (90-min) score + outcome note, computed once
+  // from ESPN per-period data. Knockouts are graded/shown on this, not the ET/penalty result.
+  const existingKoScores = (cacheData.koScores ?? {}) as Record<string, { h: number; a: number; note: string | null }>
+  const koScores: Record<string, { h: number; a: number; note: string | null }> = { ...existingKoScores }
 
   // Track updated state to write back to cache at the end of this sync
   const newStatuses: Record<string, string> = {}
@@ -308,14 +350,29 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
 
     const apiHome = m.score?.fullTime?.home ?? null
     const apiAway = m.score?.fullTime?.away ?? null
-    const scoreHome = apiHome ?? espnScore?.home ?? null
-    const scoreAway = apiAway ?? espnScore?.away ?? null
+    let scoreHome = apiHome ?? espnScore?.home ?? null
+    let scoreAway = apiAway ?? espnScore?.away ?? null
 
     // football-data lags ESPN at full-time, leaving matches stuck "in play". If ESPN reports
     // the match is over and we have a score, mark it FINISHED so it leaves the live UI promptly.
     if (espnScore?.status === 'STATUS_FULL_TIME' && ['IN_PLAY', 'PAUSED', 'TIMED'].includes(mappedStatus) && scoreHome !== null && scoreAway !== null) {
       console.log(`  [ESPN] Full-time override: ${homeCode} vs ${awayCode} ${mappedStatus} → FINISHED`)
       mappedStatus = 'FINISHED'
+    }
+
+    // Knockout matches are graded and displayed on their NORMAL-TIME (90-min) score, not the
+    // after-extra-time/penalties result. Compute it once from ESPN per-period data and cache it;
+    // `resultNote` records who advanced (e.g. "Paraguay won 4-3 on penalties").
+    let resultNote: string | null = null
+    const isKnockout = mapStage(m.stage ?? '') !== 'GROUP'
+    const koEventId = espnScore?.eventId ?? existingEspnEventIds[matchId] ?? null
+    if (isKnockout && mappedStatus === 'FINISHED') {
+      if (!koScores[matchId] && koEventId) {
+        const r = await fetchESPNKnockoutResult(koEventId, homeCode, awayCode)
+        if (r) koScores[matchId] = r
+      }
+      const ks = koScores[matchId]
+      if (ks) { scoreHome = ks.h; scoreAway = ks.a; resultNote = ks.note }
     }
 
     if (espnScore && apiHome === null) {
@@ -396,6 +453,7 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
       round,
       scorers,
       cards,
+      resultNote,
     }
 
     // Fingerprint of the client-visible fields. Excludes `currentMinute` (changes every minute
@@ -404,7 +462,7 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
     const fingerprint = JSON.stringify({
       homeCode, homeName, awayCode, awayName,
       status: mappedStatus, scoreHome, scoreAway, espnEventId,
-      kickoff: m.utcDate ?? null, stage, group, round, scorers, cards,
+      kickoff: m.utcDate ?? null, stage, group, round, scorers, cards, resultNote,
     })
     newFingerprints[matchId] = fingerprint
     const changed = existingFingerprints[matchId] !== fingerprint
@@ -467,6 +525,7 @@ async function syncMatches(): Promise<{ newlyFinished: Set<string>; toScore: Set
       fingerprints: newFingerprints,
       aggregated: existingAggregated,
       koTeams,
+      koScores,
       updatedAt: Timestamp.now(),
     })
   }
@@ -664,9 +723,11 @@ async function calculatePredictionPoints(toScore: Set<string>) {
   const finishedMatches = new Map(matchDocs.filter(d => d.exists).map(d => [d.id, d.data()!]))
 
   const isCanonical = (h: number, a: number) => (h === 99 && a === 0) || (h === 99 && a === 99) || (h === 0 && a === 99)
-  const calcPoints = (pH: number, pA: number, aH: number, aA: number): number => {
-    // Specific score: 9 for exact, 0 otherwise — no consolation points.
-    if (!isCanonical(pH, pA)) return (pH === aH && pA === aA) ? 9 : 0
+  // Exact-score points: 9 in the group stage, 15 in the knockouts. Result-only (canonical) = 3.
+  const exactPoints = (stage: string) => (stage && stage !== 'GROUP' ? 15 : 9)
+  const calcPoints = (pH: number, pA: number, aH: number, aA: number, stage: string): number => {
+    // Specific score: full exact-score points for an exact match, 0 otherwise — no consolation.
+    if (!isCanonical(pH, pA)) return (pH === aH && pA === aA) ? exactPoints(stage) : 0
     // Canonical (result-only): 3 for correct direction, 0 otherwise.
     return Math.sign(pH - pA) === Math.sign(aH - aA) ? 3 : 0
   }
@@ -696,7 +757,7 @@ async function calculatePredictionPoints(toScore: Set<string>) {
     if (!match) return false
     const s = match.score as { home: number | null; away: number | null }
     if (s.home === null || s.away === null) return false
-    const expected = calcPoints(data.predictedHome, data.predictedAway, s.home, s.away)
+    const expected = calcPoints(data.predictedHome, data.predictedAway, s.home, s.away, match.stage as string)
     return data.pointsAwarded !== expected
   })
 
@@ -713,7 +774,7 @@ async function calculatePredictionPoints(toScore: Set<string>) {
     const pred = predDoc.data()
     const match = finishedMatches.get(String(pred.matchId))!
     const s = match.score as { home: number; away: number }
-    const points = calcPoints(pred.predictedHome, pred.predictedAway, s.home, s.away)
+    const points = calcPoints(pred.predictedHome, pred.predictedAway, s.home, s.away, match.stage as string)
     const old = (pred.pointsAwarded as number | null) ?? 0
 
     if (DRY_RUN) {
@@ -721,7 +782,8 @@ async function calculatePredictionPoints(toScore: Set<string>) {
     } else {
       batch.update(predDoc.ref, { pointsAwarded: points })
       bump(ptsDelta, pred.participantId, points - old)
-      bump(exactDelta, pred.participantId, (points === 9 ? 1 : 0) - (old === 9 ? 1 : 0))
+      // Exact-score hit = 9 (group) or 15 (knockout); track the count for either.
+      bump(exactDelta, pred.participantId, (points >= 9 ? 1 : 0) - (old >= 9 ? 1 : 0))
     }
   }
 
@@ -762,7 +824,7 @@ async function calculatePredictionPoints(toScore: Set<string>) {
         if (s.home === null || s.away === null) continue
         ;(byMatch[String(p.matchId)] ??= []).push({
           p: p.participantId, h: p.predictedHome, a: p.predictedAway,
-          pts: calcPoints(p.predictedHome, p.predictedAway, s.home, s.away),
+          pts: calcPoints(p.predictedHome, p.predictedAway, s.home, s.away, match.stage as string),
         })
       }
       if (Object.keys(byMatch).length > 0) {

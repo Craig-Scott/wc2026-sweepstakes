@@ -11,7 +11,7 @@ interface Props {
 }
 
 function pointsPillClass(points: number): string {
-  if (points === 9) return 'bg-brand-600/10 text-brand-700'
+  if (points >= 9) return 'bg-brand-600/10 text-brand-700'
   if (points === 3) return 'bg-blue-100 text-blue-700'
   return 'bg-red-100 text-red-600'
 }

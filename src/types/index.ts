@@ -61,6 +61,9 @@ export interface Match {
   espnEventId?: string | null
   scorers: GoalScorer[]
   cards: Card[]
+  // For knockout matches decided in extra time / penalties: who actually advanced (the score
+  // itself is the normal-time result). e.g. "Paraguay won 4-3 on penalties".
+  resultNote?: string | null
   updatedAt: Timestamp
 }
 

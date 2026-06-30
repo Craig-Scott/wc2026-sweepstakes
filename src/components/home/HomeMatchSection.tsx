@@ -299,6 +299,9 @@ export function ResultWithPrediction({ match, prediction, participants, matchPre
           <div className="font-display font-bold text-4xl text-navy-900 tabular-nums leading-none">
             {match.score.home} <span className="text-gray-300">–</span> {match.score.away}
           </div>
+          {match.resultNote && (
+            <div className="text-[10px] text-gray-500 mt-1 max-w-[7rem] mx-auto leading-tight">{match.resultNote}</div>
+          )}
         </div>
         <div className="flex flex-col items-end gap-1 flex-1 min-w-0">
           <div className="flex items-start gap-1.5">
@@ -342,7 +345,7 @@ export function ResultWithPrediction({ match, prediction, participants, matchPre
         const myLabel = prediction
           ? predictionLabel(prediction.predictedHome, prediction.predictedAway, match.homeTeam.name, match.awayTeam.name)
           : null
-        const myPillCls = myPts === 9 ? 'bg-brand-600/10 text-brand-700'
+        const myPillCls = (myPts ?? -1) >= 9 ? 'bg-brand-600/10 text-brand-700'
           : myPts === 3 ? 'bg-blue-100 text-blue-700'
           : myPts === 0 ? 'bg-red-100 text-red-600'
           : 'bg-gray-100 text-gray-500'
@@ -365,7 +368,7 @@ export function ResultWithPrediction({ match, prediction, participants, matchPre
           )
           const label = predictionLabel(pick.predictedHome, pick.predictedAway, match.homeTeam.name, match.awayTeam.name)
           const pickPts = pick.pointsAwarded
-          const pillCls = pickPts === 9 ? 'bg-brand-600/10 text-brand-700'
+          const pillCls = (pickPts ?? -1) >= 9 ? 'bg-brand-600/10 text-brand-700'
             : pickPts === 3 ? 'bg-blue-100 text-blue-700'
             : pickPts === 0 ? 'bg-red-100 text-red-600'
             : 'bg-gray-100 text-gray-500'

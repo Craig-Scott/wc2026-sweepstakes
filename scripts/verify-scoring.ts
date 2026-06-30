@@ -25,10 +25,12 @@ function isCanonical(h: number, a: number): boolean {
   return (h === 99 && a === 0) || (h === 99 && a === 99) || (h === 0 && a === 99)
 }
 
-function score(pH: number, pA: number, aH: number, aA: number): number {
-  if (!isCanonical(pH, pA)) return (pH === aH && pA === aA) ? 9 : 0
+// Exact-score points: 9 in the group stage, 15 in the knockouts. Result-only (canonical) = 3.
+function score(pH: number, pA: number, aH: number, aA: number, exact = 9): number {
+  if (!isCanonical(pH, pA)) return (pH === aH && pA === aA) ? exact : 0
   return Math.sign(pH - pA) === Math.sign(aH - aA) ? 3 : 0
 }
+const exactFor = (stage: unknown) => (stage && stage !== 'GROUP' ? 15 : 9)
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
@@ -102,11 +104,11 @@ for (const doc of predSnap.docs) {
   if (!match) continue // match not finished yet — skip
 
   const s = match.score as { home: number; away: number }
-  const expected = score(pred.predictedHome, pred.predictedAway, s.home, s.away)
+  const expected = score(pred.predictedHome, pred.predictedAway, s.home, s.away, exactFor((match as { stage?: string }).stage))
 
   const entry = leaderboard.get(pred.participantId)!
   entry.points += expected
-  if (expected === 9) entry.exact++
+  if (expected >= 9) entry.exact++
   else if (expected === 3) entry.result++
   else entry.wrong++
 
@@ -140,7 +142,7 @@ if (FIX && discrepancies > 0) {
     const match = matchMap.get(pred.matchId)
     if (!match) continue
     const s = match.score as { home: number; away: number }
-    const expected = score(pred.predictedHome, pred.predictedAway, s.home, s.away)
+    const expected = score(pred.predictedHome, pred.predictedAway, s.home, s.away, exactFor((match as { stage?: string }).stage))
     if (pred.pointsAwarded !== expected) {
       batch.update(doc.ref, { pointsAwarded: expected })
     }

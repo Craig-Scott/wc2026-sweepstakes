@@ -82,6 +82,9 @@ export function MatchResultCard({ match, participants, matchPredictions }: Props
           <div className="font-display font-bold tabular-nums text-4xl text-navy-900 leading-none">
             {match.score.home ?? '–'} <span className="text-gray-300">–</span> {match.score.away ?? '–'}
           </div>
+          {match.resultNote && (
+            <div className="text-[10px] text-gray-500 mt-1 max-w-[7rem] mx-auto leading-tight">{match.resultNote}</div>
+          )}
         </div>
 
         {/* Away */}
@@ -147,7 +150,7 @@ export function MatchResultCard({ match, participants, matchPredictions }: Props
               )
               const label = predictionLabel(pick.predictedHome, pick.predictedAway, match.homeTeam.name, match.awayTeam.name)
               const pickPts = pick.pointsAwarded
-              const pillCls = pickPts === 9 ? 'bg-brand-600/10 text-brand-700'
+              const pillCls = (pickPts ?? -1) >= 9 ? 'bg-brand-600/10 text-brand-700'
                 : pickPts === 3 ? 'bg-blue-100 text-blue-700'
                 : pickPts === 0 ? 'bg-red-100 text-red-600'
                 : 'bg-gray-100 text-gray-500'

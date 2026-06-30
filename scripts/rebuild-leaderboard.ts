@@ -33,7 +33,7 @@ for (const d of predSnap.docs) {
   const p = d.data() as { participantId: string; pointsAwarded: number | null }
   if (p.pointsAwarded === null || p.pointsAwarded === undefined) continue
   points[p.participantId] = (points[p.participantId] ?? 0) + p.pointsAwarded
-  if (p.pointsAwarded === 9) exact[p.participantId] = (exact[p.participantId] ?? 0) + 1
+  if (p.pointsAwarded >= 9) exact[p.participantId] = (exact[p.participantId] ?? 0) + 1 // 9 (group) or 15 (KO)
 }
 
 const sorted = Object.entries(points).sort((a, b) => b[1] - a[1])

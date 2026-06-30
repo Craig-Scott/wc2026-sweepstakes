@@ -118,7 +118,7 @@ function MatchPredictionEntry({ pred, match, participants, matchPredictions }: {
       {(() => {
         const myPts = pred.pointsAwarded ?? null
         const myLabel = predictionLabel(pred.predictedHome, pred.predictedAway, match.homeTeam.name, match.awayTeam.name)
-        const myPillCls = myPts === 9 ? 'bg-brand-600/10 text-brand-700'
+        const myPillCls = (myPts ?? -1) >= 9 ? 'bg-brand-600/10 text-brand-700'
           : myPts === 3 ? 'bg-blue-100 text-blue-700'
           : myPts === 0 ? 'bg-red-100 text-red-600'
           : 'bg-gray-100 text-gray-500'
@@ -135,7 +135,7 @@ function MatchPredictionEntry({ pred, match, participants, matchPredictions }: {
           )
           const label = predictionLabel(pick.predictedHome, pick.predictedAway, match.homeTeam.name, match.awayTeam.name)
           const pickPts = pick.pointsAwarded
-          const pillCls = pickPts === 9 ? 'bg-brand-600/10 text-brand-700'
+          const pillCls = (pickPts ?? -1) >= 9 ? 'bg-brand-600/10 text-brand-700'
             : pickPts === 3 ? 'bg-blue-100 text-blue-700'
             : pickPts === 0 ? 'bg-red-100 text-red-600'
             : 'bg-gray-100 text-gray-500'

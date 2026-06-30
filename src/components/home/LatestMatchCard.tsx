@@ -82,6 +82,9 @@ export function LatestMatchCard() {
           <div className="font-display font-bold tabular-nums text-4xl text-navy-900 leading-none">
             {match.score.home ?? '–'} <span className="text-gray-300">–</span> {match.score.away ?? '–'}
           </div>
+          {match.resultNote && (
+            <div className="text-[10px] text-gray-500 mt-1 max-w-[7rem] mx-auto leading-tight">{match.resultNote}</div>
+          )}
         </div>
         <div className="flex flex-col items-end gap-1 flex-1 min-w-0">
           <div className="flex items-start gap-1.5">
