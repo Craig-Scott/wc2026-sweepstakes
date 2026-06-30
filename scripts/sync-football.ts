@@ -219,7 +219,7 @@ async function fetchESPNKnockoutResult(eventId: string, homeCode: string, awayCo
     const parsed = competitors.map(c => ({
       code: normalizeESPNCode((c.team as Record<string, unknown>)?.abbreviation as string),
       name: (c.team as Record<string, unknown>)?.displayName as string,
-      periods: (((c as Record<string, unknown>).linescores as Record<string, unknown>[]) ?? []).map(x => Number(x.value ?? 0)),
+      periods: (((c as Record<string, unknown>).linescores as Record<string, unknown>[]) ?? []).map(x => Number(x.displayValue ?? x.value ?? 0)),
     }))
     const home = parsed.find(p => p.code === homeCode)
     const away = parsed.find(p => p.code === awayCode)
